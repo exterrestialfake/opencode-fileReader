@@ -1,38 +1,26 @@
 /** @jsxImportSource @opentui/solid */
-// fs-plugin.tsx — 插件入口：注册侧边栏文件树槽位（order 600）+ 快捷键层 + 查看面板生命周期
-// 遵循 guidance/engineering_spec.md：组件 PascalCase、函数 camelCase、中文注释、错误信息中文
-import { createSignal, createMemo, For } from "solid-js"
-import type { ScrollBoxRenderable } from "@opentui/core"
-import {
-  createBindingLookup,
-  type TuiPlugin,
-  type TuiPluginApi,
-  type TuiPluginModule,
-} from "@opencode-ai/plugin/tui"
-import {
-  buildFileTree,
-  flattenFileTree,
-  readDirEntries,
-  createSkin,
-  type FileNode,
-  type FlatNode,
-  type Skin,
-} from "./fs-plugin-utils"
-import { FileViewer } from "./fs-viewer"
+// fs-plugin.tsx — 兼容入口（转发至模块化实现）
+// 实际实现已拆至 src/file-tree、src/file-viewer、src/config；本文件保留以兼容 tui.test.json 的 file:// 指向
+// 遵循 guidance/engineering_spec.md：组件 PascalCase、函数 camelCase、中文注释
+import { createSignal, onCleanup } from "solid-js"
+import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@opencode-ai/plugin/tui"
+import { buildFileTree, readDirEntries, type FileNode } from "./src/file-tree/tree-utils"
+import { FileTree } from "./src/file-tree/FileTree"
+import { FileViewer } from "./src/file-viewer/FileViewer"
+import { defaultKeymap, resolveKeybinds } from "./src/config/index"
 
-/** 默认快捷键（tui.json 可覆盖） */
-const defaultKeymap = {
-  "fs.toggle": "ctrl+shift+b",
-  "fs.open": "ctrl+shift+enter",
-}
+/** 全屏查看路由名（与宿主保留路由 home/session 区分） */
+const VIEWER_ROUTE = "fs-viewer"
 
 // 模块级状态（跨组件共享）
 const [visible, setVisible] = createSignal(true)
 const [tree, setTree] = createSignal<FileNode | null>(null)
 const [expanded, setExpanded] = createSignal<Set<string>>(new Set())
 const [selected, setSelected] = createSignal<FileNode | null>(null)
+/** 打开查看器前的来源路由（用于关闭时返回） */
+const [baseRoute, setBaseRoute] = createSignal<{ name: string; sessionID?: string }>({ name: "home" })
 
-/** 切换目录展开/折叠（展开时懒加载子目录） */
+/** 切换目录展开/折叠（展开时懒加载子目录，已移除节点上限） */
 function toggleDir(node: FileNode) {
   const next = new Set(expanded())
   if (next.has(node.path)) {
@@ -46,103 +34,34 @@ function toggleDir(node: FileNode) {
   if (root) setTree({ ...root }) // 触发重渲染
 }
 
-/** 打开查看面板（dialog） */
+/** 打开全屏查看器：记录来源路由并切换到 fs-viewer 路由 */
 function openFile(api: TuiPluginApi, node: FileNode) {
   setSelected(node)
-  // 宿主 dialog 目前只提供尺寸档位，不提供左侧定位接口；使用最大档位扩大代码阅读区域。
-  api.ui.dialog.setSize("xlarge")
-  api.ui.dialog.replace(() => <FileViewer api={api} file={node} />)
+  const cur = api.route.current
+  if (cur.name === "session") {
+    const sid = (cur.params as { sessionID?: string } | undefined)?.sessionID
+    setBaseRoute(sid ? { name: "session", sessionID: sid } : { name: "home" })
+  } else if (cur.name !== VIEWER_ROUTE) {
+    setBaseRoute({ name: cur.name })
+  }
+  api.route.navigate(VIEWER_ROUTE)
 }
 
-/** 生成树行前缀（一次计算，避免每行向后扫描整棵树） */
-function createRowPrefixes(rows: FlatNode[], expandedSet: Set<string>): string[] {
-  const maxDepth = rows.reduce((max, row) => Math.max(max, row.depth), 0)
-  const nextAtOrShallower = Array.from({ length: maxDepth + 1 }, () => -1)
-  const laterSibling = rows.map(() => Array<boolean>(maxDepth + 1).fill(false))
-
-  for (let index = rows.length - 1; index >= 0; index -= 1) {
-    const row = rows[index]!
-    for (let depth = 0; depth <= row.depth; depth += 1) {
-      const next = nextAtOrShallower[depth]
-      laterSibling[index]![depth] = next !== -1 && rows[next]!.depth === depth
-    }
-    for (let depth = row.depth; depth <= maxDepth; depth += 1) {
-      nextAtOrShallower[depth] = index
-    }
+/** 关闭查看器并返回来源界面（会话或主页） */
+function closeViewer(api: TuiPluginApi) {
+  const base = baseRoute()
+  if (base.name === "session" && base.sessionID) {
+    api.route.navigate("session", { sessionID: base.sessionID })
+  } else {
+    api.route.navigate("home")
   }
-
-  return rows.map((row, index) => {
-    const indentation = Array.from({ length: row.depth }, (_, depth) => {
-      if (depth === 0 && !laterSibling[index]![0]) return " "
-      return laterSibling[index]![depth] ? "│  " : "   "
-    }).join("")
-    const topRoot = index === 0 && row.depth === 0
-    const branch = topRoot ? " " : laterSibling[index]![row.depth] ? "├─ " : "└─ "
-    const marker = row.node.type === "dir" ? (expandedSet.has(row.node.path) ? "▾ " : "▸ ") : ""
-    return `${indentation}${branch}${marker}`
-  })
-}
-
-/** 文件树组件（sidebar_content 槽位内容） */
-function FileTree(props: { api: TuiPluginApi }) {
-  const skin = createMemo<Skin>(() => createSkin(props.api.theme.current))
-  const rows = createMemo<FlatNode[]>(() => {
-    const root = tree()
-    return root ? flattenFileTree(root, expanded()) : []
-  })
-  const prefixes = createMemo(() => createRowPrefixes(rows(), expanded()))
-  let scroll: ScrollBoxRenderable | undefined
-
-  const onRowClick = (row: FlatNode) => {
-    const node = row.node
-    setSelected(node)
-    if (node.type === "dir") toggleDir(node)
-    else openFile(props.api, node)
-  }
-
-  return (
-    <box flexDirection="column" width="100%">
-      <scrollbox
-        ref={(element: ScrollBoxRenderable) => (scroll = element)}
-        verticalScrollbarOptions={{ visible: false }}
-        horizontalScrollbarOptions={{ visible: false }}
-      >
-        <For each={rows()}>
-          {(row, index) => {
-            const isSelected = () => selected()?.path === row.node.path
-            const prefix = () => prefixes()[index()]
-            return (
-              <box
-                flexDirection="row"
-                width="100%"
-                backgroundColor={isSelected() ? skin().accent : undefined}
-                onMouseUp={() => onRowClick(row)}
-              >
-                <text fg={isSelected() ? skin().panel : skin().muted} wrapMode="none" flexShrink={0}>
-                  {prefix()}
-                </text>
-                <box flexGrow={1} minWidth={0}>
-                  <text
-                    fg={isSelected() ? skin().panel : row.node.type === "dir" ? skin().accent : skin().text}
-                    wrapMode="none"
-                  >
-                    {row.node.name}
-                  </text>
-                </box>
-              </box>
-            )
-          }}
-        </For>
-      </scrollbox>
-    </box>
-  )
 }
 
 /** 插件入口 */
 const tui: TuiPlugin = async (api, options) => {
   if (options?.enabled === false) return
 
-  // 初始化文件树（默认只展开当前目录）
+  // 初始化文件树（默认只展开当前目录，已移除目录条目上限）
   const rootDir = api.state.path.directory
   const root = buildFileTree(rootDir)
   setTree(root)
@@ -153,16 +72,57 @@ const tui: TuiPlugin = async (api, options) => {
     order: 600,
     slots: {
       sidebar_content() {
-        return visible() ? <FileTree api={api} /> : <box />
+        return visible() ? (
+          <FileTree
+            api={api}
+            tree={tree}
+            expanded={expanded}
+            selected={selected}
+            onToggleDir={toggleDir}
+            onOpenFile={(node) => openFile(api, node)}
+          />
+        ) : (
+          <box />
+        )
       },
     },
   })
 
-  // 注册快捷键层（默认键 + tui.json 覆盖）
-  const keybinds = (options?.keybinds ?? {}) as Record<string, string>
-  const keys = createBindingLookup({ ...defaultKeymap, ...keybinds })
+  // 注册查看器路由（路由内左右分栏以确保侧边栏可见，esc/q 返回来源界面）
+  api.route.register([
+    {
+      name: VIEWER_ROUTE,
+      render() {
+        const node = selected()
+        const popMode = api.mode.push("fs-plugin.viewer")
+        onCleanup(popMode)
+        if (!node) return <box />
+        return (
+          <box flexDirection="row" width="100%" height="100%">
+            <box flexGrow={1} flexBasis={0} minWidth={0}>
+              <FileViewer api={api} file={node} onClose={() => closeViewer(api)} />
+            </box>
+            <box width={42} flexShrink={0}>
+              <FileTree
+                api={api}
+                tree={tree}
+                expanded={expanded}
+                selected={selected}
+                onToggleDir={toggleDir}
+                onOpenFile={(n) => openFile(api, n)}
+              />
+            </box>
+          </box>
+        )
+      },
+    },
+  ])
+
+  // 注册快捷键层（默认键来自 config.json + tui.json 覆盖；不带 mode 以确保在输入框获焦时仍可触发；2026/8/23 1:19：fs.open 在 viewer 内复用为关闭）
+  const keybinds = resolveKeybinds((options?.keybinds ?? {}) as Record<string, string>)
+  const toggleKey = keybinds["fs.toggle"] ?? defaultKeymap["fs.toggle"]
+  const openKey = keybinds["fs.open"] ?? defaultKeymap["fs.open"]
   api.keymap.registerLayer({
-    enabled: true,
     commands: [
       {
         name: "fs.toggle",
@@ -173,6 +133,10 @@ const tui: TuiPlugin = async (api, options) => {
       {
         name: "fs.open",
         run() {
+          if (api.route.current.name === VIEWER_ROUTE) {
+            closeViewer(api)
+            return
+          }
           const node = selected()
           if (!node) return
           if (node.type === "dir") toggleDir(node)
@@ -180,7 +144,10 @@ const tui: TuiPlugin = async (api, options) => {
         },
       },
     ],
-    bindings: keys.gather("fs.global", ["fs.toggle", "fs.open"]),
+    bindings: [
+      { key: toggleKey, cmd: "fs.toggle" },
+      { key: openKey, cmd: "fs.open" },
+    ],
   })
 }
 

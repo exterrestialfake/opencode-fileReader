@@ -1,24 +1,9 @@
-// fs-plugin-utils.ts — 文件树构建/排序/隐藏文件判定/轻量着色（纯函数，便于测试）
-// 遵循 guidance/engineering_spec.md：函数加中文注释、错误信息用中文、camelCase 命名
-import { readdirSync, statSync, openSync, readSync, closeSync } from "node:fs"
-import { join, basename, extname } from "node:path"
+// src/file-viewer/viewer-utils.ts — 查看器纯函数：轻量着色、折行、文件类型判定等（已移除文件长度限制）
+// 遵循 guidance/engineering_spec.md：函数加中文注释、错误信息中文
+import { openSync, readSync, closeSync } from "node:fs"
+import { extname } from "node:path"
 import { RGBA } from "@opentui/core"
 import type { TuiThemeCurrent } from "@opencode-ai/plugin/tui"
-
-/** 文件树节点 */
-export type FileNode = {
-  name: string
-  path: string
-  type: "dir" | "file"
-  size?: number
-  children?: FileNode[]
-}
-
-/** 扁平化后的树节点（带缩进深度，用于渲染） */
-export type FlatNode = {
-  node: FileNode
-  depth: number
-}
 
 /** 轻量着色区间（接口稳定，日后可替换为完整语法高亮实现） */
 export type HighlightSpan = {
@@ -37,86 +22,6 @@ export type Skin = {
   selected: RGBA | string
   success: RGBA | string
   warning: RGBA | string
-}
-
-/** 单目录最多读取条目数（防止超大目录卡顿） */
-const MAX_DIR_ENTRIES = 300
-/** 整棵树最多节点数（默认展开时防止卡顿） */
-const MAX_TREE_NODES = 3000
-
-/** 判断是否为隐藏文件（`.` 开头）——默认可见，不做过滤 */
-export function isHiddenFile(name: string): boolean {
-  return name.startsWith(".")
-}
-
-/** 目录优先排序，同类型按名称排序 */
-export function sortEntries(a: FileNode, b: FileNode): number {
-  if (a.type !== b.type) return a.type === "dir" ? -1 : 1
-  return a.name.localeCompare(b.name)
-}
-
-/** 读取目录下一级条目（隐藏文件默认包含，不做过滤） */
-export function readDirEntries(dir: string): FileNode[] {
-  try {
-    return readdirSync(dir, { withFileTypes: true })
-      .map((entry) => {
-        const path = join(dir, entry.name)
-        const node: FileNode = { name: entry.name, path, type: entry.isDirectory() ? "dir" : "file" }
-        if (!entry.isDirectory()) {
-          try {
-            node.size = statSync(path).size
-          } catch {
-            /* 忽略 stat 失败（如权限不足） */
-          }
-        }
-        return node
-      })
-      .sort(sortEntries)
-  } catch (error) {
-    return []
-  }
-}
-
-/** 构建文件树（仅读取根目录下一级，子目录按需加载） */
-export function buildFileTree(root: string): FileNode {
-  return { name: basename(root) || root, path: root, type: "dir", children: readDirEntries(root) }
-}
-
-/** 递归加载所有子目录（默认展开用），带节点上限防止卡顿 */
-export function expandAll(node: FileNode, limit = MAX_TREE_NODES): number {
-  if (node.type !== "dir" || limit <= 0) return limit
-  if (!node.children) node.children = readDirEntries(node.path)
-  for (const child of node.children) {
-    limit = expandAll(child, limit - 1)
-    if (limit <= 0) break
-  }
-  return limit
-}
-
-/** 收集所有目录路径（用于默认展开状态） */
-export function collectDirPaths(node: FileNode): Set<string> {
-  const set = new Set<string>()
-  const walk = (n: FileNode) => {
-    if (n.type === "dir") {
-      set.add(n.path)
-      n.children?.forEach(walk)
-    }
-  }
-  walk(node)
-  return set
-}
-
-/** 将文件树扁平化为带缩进深度的列表（跳过根节点，用于渲染） */
-export function flattenFileTree(root: FileNode, expanded: Set<string>): FlatNode[] {
-  const out: FlatNode[] = []
-  const walk = (node: FileNode, depth: number) => {
-    out.push({ node, depth })
-    if (node.type === "dir" && expanded.has(node.path) && node.children) {
-      for (const child of node.children) walk(child, depth + 1)
-    }
-  }
-  if (root.children) for (const child of root.children) walk(child, 0)
-  return out
 }
 
 /** 格式化文件大小（B/KB/MB/GB） */
@@ -214,7 +119,7 @@ function getMaster(fileExt: string): RegExp {
 /**
  * 轻量着色：对单行文本做正则级匹配，返回着色区间数组。
  * 接口稳定（line, fileExt → HighlightSpan[]），日后可无缝替换为完整语法高亮实现，
- * 调用方（fs-viewer）不感知变化。
+ * 调用方（FileViewer）不感知变化。
  */
 export function highlightLine(line: string, fileExt: string): HighlightSpan[] {
   const spans: HighlightSpan[] = []
@@ -235,6 +140,22 @@ export function highlightLine(line: string, fileExt: string): HighlightSpan[] {
     }
   }
   return spans
+}
+
+/**
+ * 自动折行：将单行文本按显示宽度切分为多行。
+ * 制表符展开为 4 空格；长行换到下一显示行而非截断。
+ */
+export function wrapLine(line: string, width: number): string[] {
+  if (width <= 0) return [line]
+  const expanded = line.replace(/\t/g, "    ")
+  if (expanded.length === 0) return [""]
+  if (expanded.length <= width) return [expanded]
+  const out: string[] = []
+  for (let i = 0; i < expanded.length; i += width) {
+    out.push(expanded.slice(i, i + width))
+  }
+  return out
 }
 
 /** 从主题中提取颜色（兼容 RGBA 与字符串） */

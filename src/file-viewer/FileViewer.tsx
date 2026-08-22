@@ -1,7 +1,6 @@
 /** @jsxImportSource @opentui/solid */
-// fs-viewer.tsx — 查看面板组件（dialog 内容）
-// 文本：行号 + 轻量着色（highlightLine 薄封装）+ 滚动；PNG/图像：元信息 + Enter 外部打开；其他二进制：大小 + 外部打开
-// 遵循 guidance/engineering_spec.md：组件 PascalCase、函数 camelCase、中文注释、错误信息中文
+// src/file-viewer/FileViewer.tsx — 文件查看器独立模块（全屏路由分栏中的代码区）
+// 遵循 guidance/engineering_spec.md：组件 PascalCase、函数 camelCase、中文注释
 import { createMemo, For, Show } from "solid-js"
 import { useBindings } from "@opentui/keymap/solid"
 import { createBindingLookup } from "@opentui/keymap/extras"
@@ -16,21 +15,21 @@ import {
   isImageFile,
   formatFileSize,
   highlightLine,
+  wrapLine,
   createSkin,
-  type FileNode,
   type Skin,
-} from "./fs-plugin-utils"
+} from "./viewer-utils"
+import { defaultKeymap } from "../config/index"
+import type { FileNode } from "../file-tree/tree-utils"
 
-/** 文本查看最大行数（超出截断并提示） */
-const MAX_LINES = 2000
-
-/** 查看面板内快捷键（仅 dialog 打开时生效） */
-const viewerKeymap = {
-  "fs.viewer.up": "up,k",
-  "fs.viewer.down": "down,j",
-  "fs.viewer.pageup": "pageup",
-  "fs.viewer.pagedown": "pagedown",
-  "fs.viewer.open": "enter,return",
+/** 查看面板内快捷键（来自 config.json 唯一配置源；2026/8/23 2:11 已下沉） */
+const viewerKeymap: Record<string, string> = {
+  "fs.viewer.close": defaultKeymap["fs.viewer.close"]!,
+  "fs.viewer.up": defaultKeymap["fs.viewer.up"]!,
+  "fs.viewer.down": defaultKeymap["fs.viewer.down"]!,
+  "fs.viewer.pageup": defaultKeymap["fs.viewer.pageup"]!,
+  "fs.viewer.pagedown": defaultKeymap["fs.viewer.pagedown"]!,
+  "fs.viewer.open": defaultKeymap["fs.viewer.open"]!,
 }
 
 /** 用系统默认查看器打开文件（win32，已验证模式） */
@@ -45,7 +44,6 @@ function readImageSize(path: string): { width: number; height: number } | null {
     const buf = Buffer.alloc(24)
     const n = readSync(fd, buf, 0, 24, 0)
     closeSync(fd)
-    // PNG 魔数 89 50 4E 47 0D 0A 1A 0A；宽高位于字节 16-23（大端）
     if (n >= 24 && buf.subarray(0, 8).toString("hex") === "89504e470d0a1a0a") {
       return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) }
     }
@@ -80,73 +78,71 @@ function renderHighlighted(line: string, fileExt: string, skin: Skin): JSX.Eleme
   return parts
 }
 
-/** 查看面板组件（dialog 内容） */
-export function FileViewer(props: { api: TuiPluginApi; file: FileNode }) {
+/** 文件查看器组件（去文件长度限制，完整渲染） */
+export function FileViewer(props: { api: TuiPluginApi; file: FileNode; onClose: () => void }) {
   const skin = createMemo<Skin>(() => createSkin(props.api.theme.current))
   const dim = useTerminalDimensions()
   let scroll: ScrollBoxRenderable | undefined
 
-  // 文本内容（截断 + 提示；非文本返回 null）
-  const content = createMemo<{ lines: string[]; truncated: boolean } | null>(() => {
+  // 文本内容（已移除 MAX_LINES 截断，完整加载）
+  const content = createMemo<{ lines: string[] } | null>(() => {
     if (!isTextFile(props.file.name, props.file.path)) return null
     try {
       const raw = readFileSync(props.file.path, "utf8")
       const lines = raw.split(/\r?\n/)
-      const truncated = lines.length > MAX_LINES
-      return { lines: truncated ? lines.slice(0, MAX_LINES) : lines, truncated }
+      return { lines }
     } catch {
-      return { lines: ["（读取文件失败：无法访问该文件）"], truncated: false }
+      return { lines: ["（读取文件失败：无法访问该文件）"] }
     }
   })
 
-  // 图像尺寸（仅图像文件）
   const imageSize = createMemo(() =>
     isImageFile(props.file.name) ? readImageSize(props.file.path) : null,
   )
 
-  // 面板内滚动/打开快捷键（仅 dialog 打开时生效）
+  // 自动折行：按视口宽度将逻辑行切为显示行
+  const wrappedLines = createMemo<
+    { lineIndex: number; chunks: string[] }[] | null
+  >(() => {
+    const c = content()
+    if (!c) return null
+    void dim().width
+    const viewportWidth = scroll?.viewport.width ?? 0
+    const estimated = Math.max(40, dim().width - 50)
+    const available = viewportWidth > 0 ? viewportWidth : estimated
+    // 行号占 6 列（"0001  "），内容区已去白边仅内边距
+    const width = Math.max(20, available - 6 - 2)
+    return c.lines.map((line, idx) => ({
+      lineIndex: idx,
+      chunks: wrapLine(line, width),
+    }))
+  })
+
+  const totalVisualRows = createMemo(() => {
+    const w = wrappedLines()
+    if (!w) return 0
+    return w.reduce((sum, row) => sum + row.chunks.length, 0)
+  })
+
   const keys = createBindingLookup(viewerKeymap)
   const pageSize = () => Math.max(1, (scroll?.viewport.height ?? dim().height) - 2)
   const scrollBy = (delta: number) => {
     if (!scroll) return
-    const max = Math.max(0, (content()?.lines.length ?? 0) - scroll.viewport.height)
+    const max = Math.max(0, totalVisualRows() - scroll.viewport.height)
     scroll.scrollTo(Math.max(0, Math.min(scroll.scrollTop + delta, max)))
   }
   useBindings(() => ({
-    enabled: () => props.api.ui.dialog.open,
+    enabled: () => true,
     commands: [
-      {
-        name: "fs.viewer.up",
-        run() {
-          scrollBy(-1)
-        },
-      },
-      {
-        name: "fs.viewer.down",
-        run() {
-          scrollBy(1)
-        },
-      },
-      {
-        name: "fs.viewer.pageup",
-        run() {
-          scrollBy(-pageSize())
-        },
-      },
-      {
-        name: "fs.viewer.pagedown",
-        run() {
-          scrollBy(pageSize())
-        },
-      },
-      {
-        name: "fs.viewer.open",
-        run() {
-          openExternal(props.file.path)
-        },
-      },
+      { name: "fs.viewer.close", run() { props.onClose() } },
+      { name: "fs.viewer.up", run() { scrollBy(-1) } },
+      { name: "fs.viewer.down", run() { scrollBy(1) } },
+      { name: "fs.viewer.pageup", run() { scrollBy(-pageSize()) } },
+      { name: "fs.viewer.pagedown", run() { scrollBy(pageSize()) } },
+      { name: "fs.viewer.open", run() { openExternal(props.file.path) } },
     ],
     bindings: keys.gather("fs.viewer", [
+      "fs.viewer.close",
       "fs.viewer.up",
       "fs.viewer.down",
       "fs.viewer.pageup",
@@ -168,7 +164,6 @@ export function FileViewer(props: { api: TuiPluginApi; file: FileNode }) {
       paddingRight={2}
       gap={1}
     >
-      {/* 头部：文件名 + 大小 */}
       <box flexDirection="row" justifyContent="space-between">
         <text fg={skin().text}>
           <b>{props.file.name}</b>
@@ -176,46 +171,44 @@ export function FileViewer(props: { api: TuiPluginApi; file: FileNode }) {
         <text fg={skin().muted}>{formatFileSize(props.file.size ?? 0)}</text>
       </box>
 
-      {/* 内容区 */}
-      <box border borderColor={skin().border} flexGrow={1} paddingLeft={1} paddingRight={1}>
+      <box flexGrow={1} paddingLeft={1} paddingRight={1}>
         <Show
-          when={content()}
+          when={wrappedLines()}
           keyed
           fallback={<BinaryInfo file={props.file} skin={skin()} imageSize={imageSize()} />}
         >
-          {(c: { lines: string[]; truncated: boolean }) => (
+          {(rows: { lineIndex: number; chunks: string[] }[]) => (
             <scrollbox
               ref={(element: ScrollBoxRenderable) => (scroll = element)}
               verticalScrollbarOptions={{ visible: false }}
               horizontalScrollbarOptions={{ visible: false }}
             >
-              <For each={c.lines}>
-                {(line, index) => (
-                  <box flexDirection="row">
-                    <text fg={skin().muted} wrapMode="none" flexShrink={0}>
-                      {String(index() + 1).padStart(4)} │
-                    </text>
-                    <text fg={skin().text} wrapMode="none">
-                      {renderHighlighted(line, fileExt(), skin())}
-                    </text>
-                  </box>
+              <For each={rows}>
+                {(row) => (
+                  <For each={row.chunks}>
+                    {(chunk, chunkIndex) => (
+                      <box flexDirection="row">
+                        <text fg={skin().muted} wrapMode="none" flexShrink={0}>
+                          {chunkIndex() === 0 ? `${String(row.lineIndex + 1).padStart(4)}  ` : "      "}
+                        </text>
+                        <text fg={skin().text} wrapMode="none">
+                          {renderHighlighted(chunk, fileExt(), skin())}
+                        </text>
+                      </box>
+                    )}
+                  </For>
                 )}
               </For>
-              <Show when={c.truncated}>
-                <text fg={skin().warning}>… 文件过大，仅显示前 {MAX_LINES} 行</text>
-              </Show>
             </scrollbox>
           )}
         </Show>
       </box>
 
-      {/* 底部提示 */}
-      <text fg={skin().muted}>esc 关闭 · ↑/↓ 滚动 · Enter 用系统查看器打开</text>
+      <text fg={skin().muted}>ctrl+o/esc/q 关闭 · ↑/↓/k/j 滚动 · pageup/pagedown 翻页 · Enter 用系统查看器打开</text>
     </box>
   )
 }
 
-/** 二进制/图像信息面板 */
 function BinaryInfo(props: {
   file: FileNode
   skin: Skin
@@ -227,15 +220,9 @@ function BinaryInfo(props: {
       <text fg={props.skin.text}>文件名：{props.file.name}</text>
       <text fg={props.skin.muted}>大小：{formatFileSize(props.file.size ?? 0)}</text>
       <Show when={isImage}>
-        <Show
-          when={props.imageSize}
-          keyed
-          fallback={<text fg={props.skin.muted}>尺寸：未知</text>}
-        >
+        <Show when={props.imageSize} keyed fallback={<text fg={props.skin.muted}>尺寸：未知</text>}>
           {(size: { width: number; height: number }) => (
-            <text fg={props.skin.muted}>
-              尺寸：{size.width} × {size.height} px
-            </text>
+            <text fg={props.skin.muted}>尺寸：{size.width} × {size.height} px</text>
           )}
         </Show>
       </Show>
