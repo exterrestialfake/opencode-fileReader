@@ -1,4 +1,16 @@
 {
+  "name": "opencode-fileReader",
+  "version": "0.1.0",
+  "description": "Opencode TUI file reader plugin — sidebar file tree and IDE-style code viewer with highlight and wrap",
+  "type": "module",
+  "license": "MIT",
+  "author": "christina <exterrestrialfake@163.com>",
+  "keywords": ["opencode", "tui", "plugin", "file-tree", "viewer"],
+  "files": ["fs-plugin.tsx", "config.json", "src"],
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --experimental-strip-types --loader ./test/ts-extensionless-loader.mjs --test test/file-tree.test.ts test/file-viewer.test.ts test/config.test.ts"
+  },
   "dependencies": {
     "@opencode-ai/plugin": "1.18.18",
     "@opencode-ai/sdk": "1.18.18",
