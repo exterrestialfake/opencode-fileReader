@@ -9,6 +9,8 @@ fi
 
 plugin_path="$script_dir/fs-plugin.tsx"
 config_path="$script_dir/tui.test.json"
+node_modules_path="$script_dir/node_modules"
+runtime_packages='@opentui/core @opentui/keymap @opentui/solid solid-js'
 
 if [ ! -f "$plugin_path" ]; then
   printf '找不到插件入口：%s\n' "$plugin_path" >&2
@@ -17,6 +19,22 @@ fi
 
 if [ ! -s "$config_path" ]; then
   printf '配置文件不存在或为空：%s\n' "$config_path" >&2
+  exit 1
+fi
+
+# 仅验证运行时依赖；安装必须由用户在插件目录中手动执行。
+missing_packages=
+for package_name in $runtime_packages; do
+  if [ ! -d "$node_modules_path/$package_name" ]; then
+    if [ -n "$missing_packages" ]; then
+      missing_packages="$missing_packages、$package_name"
+    else
+      missing_packages=$package_name
+    fi
+  fi
+done
+if [ -n "$missing_packages" ]; then
+  printf '缺少运行时依赖：%s。请在插件目录手动执行：npm ci --omit=dev --ignore-scripts\n' "$missing_packages" >&2
   exit 1
 fi
 

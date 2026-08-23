@@ -4,6 +4,8 @@ $ErrorActionPreference = "Stop"
 
 $pluginPath = Join-Path $PSScriptRoot "fs-plugin.tsx"
 $configPath = Join-Path $PSScriptRoot "tui.test.json"
+$nodeModulesPath = Join-Path $PSScriptRoot "node_modules"
+$runtimePackages = @("@opentui/core", "@opentui/keymap", "@opentui/solid", "solid-js")
 
 if (-not (Test-Path -LiteralPath $pluginPath -PathType Leaf)) {
   throw "找不到插件入口：$pluginPath"
@@ -15,6 +17,18 @@ if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
 
 if ((Get-Item -LiteralPath $configPath).Length -eq 0) {
   throw "配置文件为空：$configPath"
+}
+
+# 仅验证运行时依赖；安装必须由用户在插件目录中手动执行。
+$missingPackages = @(
+  foreach ($packageName in $runtimePackages) {
+    if (-not (Test-Path -LiteralPath (Join-Path $nodeModulesPath $packageName) -PathType Container)) {
+      $packageName
+    }
+  }
+)
+if ($missingPackages.Count -gt 0) {
+  throw "缺少运行时依赖：$($missingPackages -join '、')。请在插件目录手动执行：npm ci --omit=dev --ignore-scripts"
 }
 
 try {
