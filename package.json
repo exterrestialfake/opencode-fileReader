@@ -13,13 +13,15 @@
     "test:setup:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File test/setup-opencode.test.ps1"
   },
   "dependencies": {
-    "@opencode-ai/plugin": "1.18.18",
-    "@opencode-ai/sdk": "1.18.18",
     "@opentui/core": "0.4.5",
     "@opentui/keymap": "0.4.5",
     "@opentui/solid": "0.4.5",
+    "solid-js": "1.9.12"
+  },
+  "devDependencies": {
+    "@opencode-ai/plugin": "1.18.18",
+    "@opencode-ai/sdk": "1.18.18",
     "@types/node": "24.13.3",
-    "solid-js": "1.9.12",
     "typescript": "5.6.3"
   }
 }
