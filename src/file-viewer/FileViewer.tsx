@@ -19,18 +19,7 @@ import {
   createSkin,
   type Skin,
 } from "./viewer-utils"
-import { defaultKeymap } from "../config/index"
 import type { FileNode } from "../file-tree/tree-utils"
-
-/** 查看面板内快捷键（来自 config.json 唯一配置源；2026/8/23 2:11 已下沉） */
-const viewerKeymap: Record<string, string> = {
-  "fs.viewer.close": defaultKeymap["fs.viewer.close"]!,
-  "fs.viewer.up": defaultKeymap["fs.viewer.up"]!,
-  "fs.viewer.down": defaultKeymap["fs.viewer.down"]!,
-  "fs.viewer.pageup": defaultKeymap["fs.viewer.pageup"]!,
-  "fs.viewer.pagedown": defaultKeymap["fs.viewer.pagedown"]!,
-  "fs.viewer.open": defaultKeymap["fs.viewer.open"]!,
-}
 
 /** 用系统默认查看器打开文件（win32，已验证模式） */
 function openExternal(filePath: string) {
@@ -79,7 +68,21 @@ function renderHighlighted(line: string, fileExt: string, skin: Skin): JSX.Eleme
 }
 
 /** 文件查看器组件（去文件长度限制，完整渲染） */
-export function FileViewer(props: { api: TuiPluginApi; file: FileNode; onClose: () => void }) {
+export function FileViewer(props: {
+  api: TuiPluginApi
+  file: FileNode
+  resolvedKeymap: Record<string, string>
+  onClose: () => void
+}) {
+  // 查看面板快捷键（由入口传入的 resolvedKeymap 提供，已合并 config.json + tui.json 覆盖，避免与 resolveKeybinds 冲撞）
+  const viewerKeymap: Record<string, string> = {
+    "fs.viewer.close": props.resolvedKeymap["fs.viewer.close"]!,
+    "fs.viewer.up": props.resolvedKeymap["fs.viewer.up"]!,
+    "fs.viewer.down": props.resolvedKeymap["fs.viewer.down"]!,
+    "fs.viewer.pageup": props.resolvedKeymap["fs.viewer.pageup"]!,
+    "fs.viewer.pagedown": props.resolvedKeymap["fs.viewer.pagedown"]!,
+    "fs.viewer.open": props.resolvedKeymap["fs.viewer.open"]!,
+  }
   const skin = createMemo<Skin>(() => createSkin(props.api.theme.current))
   const dim = useTerminalDimensions()
   let scroll: ScrollBoxRenderable | undefined

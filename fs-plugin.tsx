@@ -7,7 +7,7 @@ import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@opencode-ai/plug
 import { buildFileTree, readDirEntries, type FileNode } from "./src/file-tree/tree-utils"
 import { FileTree } from "./src/file-tree/FileTree"
 import { FileViewer } from "./src/file-viewer/FileViewer"
-import { defaultKeymap, resolveKeybinds } from "./src/config/index"
+import { resolveKeybinds } from "./src/config/index"
 
 /** 全屏查看路由名（与宿主保留路由 home/session 区分） */
 const VIEWER_ROUTE = "fs-viewer"
@@ -67,6 +67,9 @@ const tui: TuiPlugin = async (api, options) => {
   setTree(root)
   setExpanded(new Set([root.path]))
 
+  // 解析快捷键（config.json 默认值 + tui.json 传入覆盖，单一来源）
+  const resolvedKeymap = resolveKeybinds((options?.keybinds ?? {}) as Record<string, string>)
+
   // 注册侧边栏槽位（order 600，内置 files 500 之后）
   api.slots.register({
     order: 600,
@@ -100,7 +103,7 @@ const tui: TuiPlugin = async (api, options) => {
         return (
           <box flexDirection="row" width="100%" height="100%">
             <box flexGrow={1} flexBasis={0} minWidth={0}>
-              <FileViewer api={api} file={node} onClose={() => closeViewer(api)} />
+              <FileViewer api={api} file={node} resolvedKeymap={resolvedKeymap} onClose={() => closeViewer(api)} />
             </box>
             <box width={42} flexShrink={0}>
               <FileTree
@@ -118,10 +121,9 @@ const tui: TuiPlugin = async (api, options) => {
     },
   ])
 
-  // 注册快捷键层（默认键来自 config.json + tui.json 覆盖；不带 mode 以确保在输入框获焦时仍可触发；2026/8/23 1:19：fs.open 在 viewer 内复用为关闭）
-  const keybinds = resolveKeybinds((options?.keybinds ?? {}) as Record<string, string>)
-  const toggleKey = keybinds["fs.toggle"] ?? defaultKeymap["fs.toggle"]
-  const openKey = keybinds["fs.open"] ?? defaultKeymap["fs.open"]
+  // 注册快捷键层（不带 mode 以确保在输入框获焦时仍可触发；2026/8/23 1:19：fs.open 在 viewer 内复用为关闭）
+  const toggleKey = resolvedKeymap["fs.toggle"]
+  const openKey = resolvedKeymap["fs.open"]
   api.keymap.registerLayer({
     commands: [
       {
