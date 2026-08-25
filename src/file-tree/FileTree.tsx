@@ -1,7 +1,7 @@
 /** @jsxImportSource @opentui/solid */
 // src/file-tree/FileTree.tsx — 文件树独立模块（侧边栏渲染）
 // 遵循 guidance/engineering_spec.md：组件 PascalCase、函数 camelCase、中文注释
-import { createMemo, For } from "solid-js"
+import { createEffect, createMemo, For } from "solid-js"
 import type { ScrollBoxRenderable } from "@opentui/core"
 import type { TuiPluginApi } from "@opencode-ai/plugin/tui"
 import { flattenFileTree, type FileNode, type FlatNode } from "./tree-utils"
@@ -52,6 +52,22 @@ export function FileTree(props: {
   })
   const prefixes = createMemo(() => createRowPrefixes(rows(), props.expanded()))
   let scroll: ScrollBoxRenderable | undefined
+
+  // 稳定滚动：光标移出时仅滚动一行（模拟拉动滚动条），避免来回跳跃
+  createEffect(() => {
+    const path = props.selected()?.path
+    const index = rows().findIndex((row) => row.node.path === path)
+    if (index === -1 || !scroll) return
+    const top = Math.floor(scroll.scrollTop)
+    const height = Math.max(1, Math.floor(scroll.viewport.height))
+    if (index < top) {
+      // 向上越界一格 -> 仅上滚一行，光标出现在可视区顶部
+      scroll.scrollTo(index)
+    } else if (index >= top + height) {
+      // 向下越界一格 -> 仅下滚一行，光标出现在可视区底部
+      scroll.scrollTo(index - height + 1)
+    }
+  })
 
   const onRowClick = (row: FlatNode) => {
     const node = row.node

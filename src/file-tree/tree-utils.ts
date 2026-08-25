@@ -76,6 +76,54 @@ export function collectDirPaths(node: FileNode): Set<string> {
   return set
 }
 
+/** 在树中按路径查找节点（仅遍历已加载部分，折叠目录未加载子项自然不深入） */
+export function findNodeByPath(root: FileNode, path: string): FileNode | null {
+  if (root.path === path) return root
+  for (const child of root.children ?? []) {
+    const hit = findNodeByPath(child, path)
+    if (hit) return hit
+  }
+  return null
+}
+
+/** 刷新结果：tree 为刷新后的新树（根目录被删除时为 null）；validExpanded 为仍存在的已展开目录路径 */
+export type RefreshResult = {
+  tree: FileNode | null
+  validExpanded: Set<string>
+}
+
+/**
+ * 刷新文件树以反映外部文件系统变化（新增/删除/重命名）：
+ * 重读根目录与所有已展开目录的子项，折叠目录保持懒加载不读取；
+ * 已被删除的展开路径不会出现在 validExpanded 中，由调用方同步收缩展开集合。
+ */
+export function refreshTree(root: FileNode, expandedPaths: Set<string>): RefreshResult {
+  // 根目录已被删除或不可访问：整棵树作废，由调用方清空相关状态
+  try {
+    if (!statSync(root.path).isDirectory()) return { tree: null, validExpanded: new Set() }
+  } catch {
+    return { tree: null, validExpanded: new Set() }
+  }
+  const validExpanded = new Set<string>()
+  if (expandedPaths.has(root.path)) validExpanded.add(root.path)
+
+  /** 重读单个目录并递归处理子项：仍在展开集合中的子目录继续向下重读，其余保持懒加载 */
+  const rebuildDir = (dirPath: string, name: string): FileNode => {
+    const children = readDirEntries(dirPath).map((child) => {
+      if (child.type !== "dir") return child // 文件节点由 readDirEntries 生成，大小等信息已是最新
+      if (!expandedPaths.has(child.path)) {
+        const collapsed: FileNode = { name: child.name, path: child.path, type: "dir" }
+        return collapsed // 折叠目录不读取子项，保持懒加载
+      }
+      validExpanded.add(child.path)
+      return rebuildDir(child.path, child.name)
+    })
+    return { name, path: dirPath, type: "dir", children }
+  }
+
+  return { tree: rebuildDir(root.path, root.name), validExpanded }
+}
+
 /** 将文件树扁平化为带缩进深度的列表（跳过根节点，用于渲染） */
 export function flattenFileTree(root: FileNode, expanded: Set<string>): FlatNode[] {
   const out: FlatNode[] = []
@@ -87,4 +135,19 @@ export function flattenFileTree(root: FileNode, expanded: Set<string>): FlatNode
   }
   if (root.children) for (const child of root.children) walk(child, 0)
   return out
+}
+
+/**
+ * 切换目录展开/折叠：展开时懒加载子目录（children 缺失才读取），返回新的展开集合。
+ * 不修改传入集合，调用方以新集合触发重渲染；从 fs-plugin 入口原样提取，仅为可测性导出。
+ */
+export function toggleExpanded(node: FileNode, expanded: Set<string>): Set<string> {
+  const next = new Set(expanded)
+  if (next.has(node.path)) {
+    next.delete(node.path)
+  } else {
+    if (!node.children) node.children = readDirEntries(node.path)
+    next.add(node.path)
+  }
+  return next
 }

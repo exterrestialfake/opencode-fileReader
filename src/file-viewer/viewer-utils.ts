@@ -1,5 +1,6 @@
 // src/file-viewer/viewer-utils.ts — 查看器纯函数：轻量着色、折行、文件类型判定等（已移除文件长度限制）
 // 遵循 guidance/engineering_spec.md：函数加中文注释、错误信息中文
+import { spawn } from "node:child_process"
 import { openSync, readSync, closeSync } from "node:fs"
 import { extname } from "node:path"
 import { RGBA } from "@opentui/core"
@@ -66,6 +67,11 @@ export function isTextFile(name: string, path?: string): boolean {
 /** 判断文件是否为图像 */
 export function isImageFile(name: string): boolean {
   return IMAGE_EXTS.has(extname(name).slice(1).toLowerCase())
+}
+
+/** 用系统默认查看器打开文件（win32，已验证模式；键盘导航与查看器共用） */
+export function openExternal(filePath: string) {
+  spawn("explorer.exe", [filePath], { detached: true, stdio: "ignore", windowsHide: true }).unref()
 }
 
 /** 常见编程语言关键词（轻量正则匹配用） */
@@ -156,6 +162,22 @@ export function wrapLine(line: string, width: number): string[] {
     out.push(expanded.slice(i, i + width))
   }
   return out
+}
+
+/**
+ * 计算阅读页内容折行宽度：视口宽度优先（>0 时），否则按终端宽度估算（下限 40）；
+ * 再扣除行号占位（6 列，"0001  "）与内容区内边距（2 列），最终下限 20 列。
+ * 从 FileViewer 的 wrappedLines 记忆体原样提取，仅为可测性导出（窄终端行为可独立验证）。
+ */
+export function viewerWrapWidth(viewportWidth: number, termWidth: number): number {
+  const estimated = Math.max(40, termWidth - 50)
+  const available = viewportWidth > 0 ? viewportWidth : estimated
+  return Math.max(20, available - 6 - 2)
+}
+
+/** 汇总折行布局的总可视行数（滚动上限计算依据）；从 FileViewer 原样提取，仅为可测性导出 */
+export function totalVisualRows(rows: { chunks: string[] }[]): number {
+  return rows.reduce((sum, row) => sum + row.chunks.length, 0)
 }
 
 /** 从主题中提取颜色（兼容 RGBA 与字符串） */

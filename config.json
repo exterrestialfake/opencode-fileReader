@@ -2,9 +2,14 @@
   "keybinds": {
     "fs.toggle": "ctrl+b",
     "fs.open": "ctrl+o",
+    "fs.refresh": "ctrl+r",
+    "fs.cursorUp": "ctrl+up",
+    "fs.cursorDown": "ctrl+down",
+    "fs.cursorLeft": "ctrl+left",
+    "fs.cursorRight": "ctrl+right",
     "fs.viewer.close": "esc,q,ctrl+o",
-    "fs.viewer.up": "up,k",
-    "fs.viewer.down": "down,j",
+    "fs.viewer.up": "up",
+    "fs.viewer.down": "down",
     "fs.viewer.pageup": "pageup",
     "fs.viewer.pagedown": "pagedown",
     "fs.viewer.open": "enter,return"

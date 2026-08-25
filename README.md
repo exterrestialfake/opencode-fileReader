@@ -177,8 +177,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File test/setup-opencode.test.ps1
 ## 使用
 
 - **浏览**：鼠标点击目录可折叠/展开，点击文件可在分栏中打开；再次按 `ctrl+o` 或 `esc/q` 返回
-- **滚动**：在代码区使用 `up/k`、`down/j`、`pageup`、`pagedown` 滚动；超长行会自动换到下一行显示
-- **图像/二进制**：选中 `png/jpg` 等图像会显示文件名/大小/尺寸，按 `Enter` 用系统查看器打开原图
+- **键盘驱动**：`ctrl+up`/`ctrl+down` 上下移动树光标（全局，选中文件时阅读页动态跟随渲染），`ctrl+left` 折叠或跳到上级，`ctrl+right` 展开目录或打开文件，`enter`（仅阅读页内）打开/折叠；尚无选中时按 `ctrl+o` 会先选中第一行作为起点
+- **滚动**：在代码区使用 `pageup`、`pagedown` 或滚轮滚动；超长行会自动换到下一行显示
+- **图像/二进制**：选中 `png/jpg` 等图像会显示文件名/大小/尺寸，按 `enter`（已显示时）或 `return` 用系统查看器打开原图
 
 ## 快捷键
 
@@ -187,11 +188,20 @@ powershell -NoProfile -ExecutionPolicy Bypass -File test/setup-opencode.test.ps1
 | 功能 | 默认键 | 说明 |
 | --- | --- | --- |
 | 显隐文件树 | `ctrl+b` | 开/关右侧文件树 |
-| 打开/关闭文件 | `ctrl+o` | 选中文件时打开；在阅读页内再次按 `ctrl+o` 关闭返回 |
+| 打开/关闭文件 | `ctrl+o`（全局）/ `enter`（仅阅读页） | `ctrl+o` 选中文件时打开，阅读页内关闭；`enter` 仅阅读页内打开/折叠（目录切换，文件打开，二进制外部打开）；无选中时 `ctrl+o` 先选首行 |
+| 手动刷新文件树 | `ctrl+r` | 自动刷新之外的手动兜底入口 |
+| 光标上移 | `ctrl+up` | 全局移动树光标，到顶停留（带 ctrl 不影响输入） |
+| 光标下移 | `ctrl+down` | 全局移动树光标，到底停留；落在文件上时阅读页跟随渲染 |
+| 折叠/跳上级 | `ctrl+left` | 展开中的目录折叠；文件或已折叠目录跳到父目录 |
+| 展开/打开 | `ctrl+right` | 折叠的目录展开（懒加载）；文件直接打开 |
+| 代码区上滚 | `up` | 阅读页内代码区单行上滚 |
+| 代码区下滚 | `down` | 阅读页内代码区单行下滚 |
 | 关闭阅读页 | `esc, q` | `ctrl+o` 的备选 |
-| 上/下滚动 | `up,k` / `down,j` | |
-| 上/下翻页 | `pageup` / `pagedown` | |
+| 上/下翻页 | `pageup` / `pagedown` | 代码区翻页 |
 | 系统打开 | `enter,return` | 二进制/图像用系统查看器打开 |
+
+> 树光标键（`fs.cursor*`）已改为全局 `ctrl+up/ctrl+down/ctrl+left/ctrl+right`，带修饰键不影响提示词输入；
+> 树 `ctrl+*` 与代码区 `up/down` 已分离，无冲突；`enter` 仅在阅读页内生效，未路由时回车归还给输入框。
 
 覆盖示例：
 
@@ -214,6 +224,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File test/setup-opencode.test.ps1
 
 - 快捷键默认值集中在 `config.json`，插件会将 `tui.json` 中传入的 `keybinds` 与其合并
 - 文件树默认仅展开根目录，隐藏文件默认可见，无需额外开关
+- 文件树自动刷新：外部新增/删除/重命名文件后数秒内自动更新（`fs.watch` 递归监听 + 轮询保底），已展开目录与选中状态尽量保留；选中文件被删除则清空选中；也可按 `ctrl+r` 手动刷新
 
 ## 常见问题
 

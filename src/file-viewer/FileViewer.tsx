@@ -6,7 +6,6 @@ import { useBindings } from "@opentui/keymap/solid"
 import { createBindingLookup } from "@opentui/keymap/extras"
 import { useTerminalDimensions, type JSX } from "@opentui/solid"
 import type { ScrollBoxRenderable } from "@opentui/core"
-import { spawn } from "node:child_process"
 import { readFileSync, openSync, readSync, closeSync } from "node:fs"
 import { extname } from "node:path"
 import type { TuiPluginApi } from "@opencode-ai/plugin/tui"
@@ -16,15 +15,13 @@ import {
   formatFileSize,
   highlightLine,
   wrapLine,
+  viewerWrapWidth,
+  totalVisualRows,
   createSkin,
+  openExternal,
   type Skin,
 } from "./viewer-utils"
 import type { FileNode } from "../file-tree/tree-utils"
-
-/** 用系统默认查看器打开文件（win32，已验证模式） */
-function openExternal(filePath: string) {
-  spawn("explorer.exe", [filePath], { detached: true, stdio: "ignore", windowsHide: true }).unref()
-}
 
 /** 读取图像尺寸（PNG 从文件头解析；其他格式返回 null） */
 function readImageSize(path: string): { width: number; height: number } | null {
@@ -103,7 +100,7 @@ export function FileViewer(props: {
     isImageFile(props.file.name) ? readImageSize(props.file.path) : null,
   )
 
-  // 自动折行：按视口宽度将逻辑行切为显示行
+  // 自动折行：按视口宽度将逻辑行切为显示行（宽度推导收敛到 viewer-utils.viewerWrapWidth）
   const wrappedLines = createMemo<
     { lineIndex: number; chunks: string[] }[] | null
   >(() => {
@@ -111,27 +108,25 @@ export function FileViewer(props: {
     if (!c) return null
     void dim().width
     const viewportWidth = scroll?.viewport.width ?? 0
-    const estimated = Math.max(40, dim().width - 50)
-    const available = viewportWidth > 0 ? viewportWidth : estimated
-    // 行号占 6 列（"0001  "），内容区已去白边仅内边距
-    const width = Math.max(20, available - 6 - 2)
+    const width = viewerWrapWidth(viewportWidth, dim().width)
     return c.lines.map((line, idx) => ({
       lineIndex: idx,
       chunks: wrapLine(line, width),
     }))
   })
 
-  const totalVisualRows = createMemo(() => {
+  // 总可视行数（滚动上限依据；汇总逻辑收敛到 viewer-utils.totalVisualRows）
+  const totalRows = createMemo(() => {
     const w = wrappedLines()
     if (!w) return 0
-    return w.reduce((sum, row) => sum + row.chunks.length, 0)
+    return totalVisualRows(w)
   })
 
   const keys = createBindingLookup(viewerKeymap)
   const pageSize = () => Math.max(1, (scroll?.viewport.height ?? dim().height) - 2)
   const scrollBy = (delta: number) => {
     if (!scroll) return
-    const max = Math.max(0, totalVisualRows() - scroll.viewport.height)
+    const max = Math.max(0, totalRows() - scroll.viewport.height)
     scroll.scrollTo(Math.max(0, Math.min(scroll.scrollTop + delta, max)))
   }
   useBindings(() => ({
@@ -207,7 +202,7 @@ export function FileViewer(props: {
         </Show>
       </box>
 
-      <text fg={skin().muted}>ctrl+o/esc/q 关闭 · ↑/↓/k/j 滚动 · pageup/pagedown 翻页 · Enter 用系统查看器打开</text>
+      <text fg={skin().muted}>ctrl+o/esc/q 关闭 · ctrl+↑/↓ 移动树光标 · pageup/pagedown 滚动 · return 用系统查看器打开</text>
     </box>
   )
 }

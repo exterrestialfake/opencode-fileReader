@@ -7,12 +7,18 @@ import { pathToFileURL } from "node:url"
 import { defaultKeymap, resolveKeybinds } from "../src/config/index"
 
 describe("config", () => {
-  test("默认快捷键包含全部键（含 viewer）", () => {
+  test("默认快捷键包含全部键（含 viewer 与树光标）", () => {
     assert.equal(defaultKeymap["fs.toggle"], "ctrl+b")
     assert.equal(defaultKeymap["fs.open"], "ctrl+o")
+    assert.equal(defaultKeymap["fs.cursorUp"], "ctrl+up")
+    assert.equal(defaultKeymap["fs.cursorDown"], "ctrl+down")
+    assert.equal(defaultKeymap["fs.cursorLeft"], "ctrl+left")
+    assert.equal(defaultKeymap["fs.cursorRight"], "ctrl+right")
     assert.equal(defaultKeymap["fs.viewer.close"], "esc,q,ctrl+o")
-    assert.equal(defaultKeymap["fs.viewer.up"], "up,k")
-    assert.equal(defaultKeymap["fs.viewer.down"], "down,j")
+    assert.equal(defaultKeymap["fs.viewer.up"], "up")
+    assert.equal(defaultKeymap["fs.viewer.down"], "down")
+    // fs.cursorOpen 已合并至 fs.open（enter 仅 viewer 模式，见 fs-plugin），不再单独配置
+    assert.equal(defaultKeymap["fs.cursorOpen"], undefined)
   })
 
   test("resolveKeybinds 合并 tui.json 覆盖", () => {

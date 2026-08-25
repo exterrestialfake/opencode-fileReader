@@ -23,12 +23,18 @@ sh test/setup-opencode.test.sh
 pwsh -File test/setup-opencode.test.ps1
 ```
 
-结果：PASS。全量 `npm test` 通过 14 个 Node 测试与 1 个 POSIX Shell 配置链路测试，0 个失败；独立 Windows PowerShell 配置链路测试同样通过。
+结果：PASS。全量 Node 测试 40 个全部通过、0 个失败（其中 2026/8/24 新增行为测试 18 个，覆盖 bug.md #5 场景）；POSIX Shell 配置链路测试与独立 Windows PowerShell 配置链路测试同样通过。
 
 测试覆盖：
 - `file-tree`（4）：隐藏文件、目录优先排序、目录读取（已去上限）、扁平化
 - `file-viewer`（6）：文件大小、文本/图像识别、无扩展名探测、轻量着色、自动折行（长行切分/恰好等宽/空行/制表符/边界）
 - `config`（4）：默认快捷键完整性、合并覆盖、当前值一致性，以及临时修改 `config.json` 后模块默认值同步更新
+- `behavior`（18，2026/8/24 新增，对应 bug.md「行为测试过少」#4）：
+  - 路由往返（3）：来源路由记录（session 提取 sessionID、缺失回落 home、自定义路由按名保留）、返回导航（会话带回 sessionID、其余回主页）、完整往返（session(s1) 进入 fs-viewer 后原样返回）
+  - 快捷键冲突与优先级（6）：树导航层以 priority 10 注册且 tui.json 覆盖整体替换绑定序列、同键分层（j 键树光标 priority 10 优先于代码区滚动 priority 0，注销后滚动恢复）、无 mode 全局层在输入框获焦（input 模式）仍触发而带 mode 层被抑制、树导航命令行为（目录仅选中/文件触发打开/折叠跳父级/展开懒加载目录/enter 打开文本）、空树安全、默认键位约定（全局命令互不冲突；up/k 与 ctrl+o 同键为有意分层设计）
+  - 插件重载与 dispose 清理（4）：watcher 自动刷新新增文件且 dispose 后停止、重载模拟（旧实例清理后新实例独立刷新、旧实例保持沉寂）、dispose 释放轮询定时器（REFRESH_POLL_MS）与待处理防抖定时器（REFRESH_DEBOUNCE_MS）、轮询保底在树被清空且根目录恢复时整棵重建并默认展开根目录
+  - 双树一致性（1）：侧边栏与阅读页右侧两实例共享单一状态源（tree/expanded/selected），初始/展开/折叠/选中渲染始终一致，toggleExpanded 不修改原集合，applyRefresh 后两实例同步看到新文件且选中对象身份保留（阅读页状态不被重置）
+  - 窄终端折行（4）：终端宽度 40/60/80 下 `viewerWrapWidth` 钳制为 32（估算下限 40 扣除行号 6 列与内边距 2 列）、视口宽度优先且最终下限 20 列、宽度 32 下长行切分与制表符展开、`totalVisualRows` 汇总多逻辑行可视行数（滚动上限非负）
 - `setup-opencode.sh`（1，仅校验）：四包（`@opentui/core`、`@opentui/keymap`、`@opentui/solid`、`solid-js`）目录齐全时成功且仅向 stdout 输出解析后的配置绝对路径、跨工作目录一致、消费者 `export OPENCODE_TUI_CONFIG="$(sh setup-opencode.sh)"` 契约生效；零安装（`node_modules` 缺失）与逐包缺失（四包各缺一）均失败且错误必须点名缺失包并给出准确指引 `npm ci --omit=dev --ignore-scripts`、伪造 `npm` 从未被调用、`node_modules`/`tui.test.json`/`fs-plugin.tsx` 均未被改写、失败时 stdout 为空且错误写入 stderr；另覆盖空配置、无效 JSON、未注册 `fs-plugin.tsx` 与缺失入口拒绝
 - `setup-opencode.ps1`（1，仅校验）：四包目录齐全时成功并在当前进程设置 `OPENCODE_TUI_CONFIG`（进程级临时变量，POSIX 为 `export`、PowerShell 为 `$env:OPENCODE_TUI_CONFIG`）、不污染 `OPENCODE_CONFIG`、支持字符串与 `[路径, 配置]` 元组两种 `plugin` 写法、跨工作目录一致、输出包含 `现在请手动执行：opencode`；零安装与逐包缺失均失败且错误必须点名缺失包并给出准确指引 `npm ci --omit=dev --ignore-scripts`、伪造 `npm.cmd` 从未被调用、`node_modules`/配置/入口均未被改写、失败时不污染已有 `OPENCODE_TUI_CONFIG`；另覆盖空配置、无效 JSON、未注册 `fs-plugin.tsx` 与缺失入口拒绝；持久注册由用户自行编辑全局 `tui.json` 的 `plugin` 数组完成
 
@@ -76,6 +82,17 @@ pwsh -File test/setup-opencode.test.ps1
 - `npm run typecheck`：PASS。
 - 临时目录执行 `npm ci --omit=dev --ignore-scripts`：PASS，四个直接运行时包齐全，根 `devDependencies` 中的 `@opencode-ai/plugin`、`@opencode-ai/sdk`、`@types/node` 未安装。
 - `git diff --check`：PASS；首次检查发现的 `test/setup-opencode.test.sh` 一处尾随空格已修正。
+
+### 行为测试补充（2026-8/24，bug.md #4）
+
+1. 现状确认：既有测试仅覆盖纯函数（tree-utils/cursor-utils/viewer-utils/config），路由往返、快捷键优先级、dispose 清理、双树一致性、窄终端折行均无覆盖。
+2. 最小可测性导出（不改行为，仅下沉纯逻辑；原因：`fs-plugin.tsx`/`FileViewer.tsx` 含 JSX 与 TUI 运行时导入，`node --experimental-strip-types` 无法加载 .tsx，纯决策逻辑必须落到 .ts 模块才可测）：
+   - 新增 `src/plugin/route-utils.ts`：`resolveBaseRoute`/`returnToBase` 自 `fs-plugin.tsx` 的 `openFile`/`closeViewer` 原样提取；
+   - `src/file-tree/tree-utils.ts` 新增 `toggleExpanded`（自入口 `toggleDir` 提取）；
+   - `src/file-viewer/viewer-utils.ts` 新增 `viewerWrapWidth`/`totalVisualRows`（自 `FileViewer` 记忆体提取），`FileViewer.tsx` 改为调用；
+   - `fs-plugin.tsx` 相应改为薄包装，路由记录/返回、展开切换行为逐字保留。
+3. 新增 `test/behavior.test.ts`（18 测试）：真实实现 + 最小 mock（keymap 宿主按「模式过滤 + 优先级最高」分发并展开逗号分隔键序列；定时器桩透传计时仅记录句柄；导航依赖注入普通变量存储），不引入真实 TUI 运行时、不新增测试框架（沿用 node:test）。
+4. 绿灯确认：`npx tsc --noEmit` PASS；Node 全量 40 测试 PASS；`sh test/setup-opencode.test.sh` 与 `npm run test:setup:windows` 均 PASS。bug.md「行为测试过少」一项可标记解决。
 
 ### 清单与锁文件
 

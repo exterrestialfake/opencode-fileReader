@@ -9,7 +9,7 @@
   "files": ["fs-plugin.tsx", "config.json", "src"],
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --experimental-strip-types --loader ./test/ts-extensionless-loader.mjs --test test/file-tree.test.ts test/file-viewer.test.ts test/config.test.ts && sh test/setup-opencode.test.sh",
+    "test": "node --experimental-strip-types --loader ./test/ts-extensionless-loader.mjs --test test/file-tree.test.ts test/file-viewer.test.ts test/config.test.ts test/behavior.test.ts && sh test/setup-opencode.test.sh",
     "test:setup:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File test/setup-opencode.test.ps1"
   },
   "dependencies": {
