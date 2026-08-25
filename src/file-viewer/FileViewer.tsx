@@ -6,63 +6,23 @@ import { useBindings } from "@opentui/keymap/solid"
 import { createBindingLookup } from "@opentui/keymap/extras"
 import { useTerminalDimensions, type JSX } from "@opentui/solid"
 import type { ScrollBoxRenderable } from "@opentui/core"
-import { readFileSync, openSync, readSync, closeSync } from "node:fs"
+import { readFileSync } from "node:fs"
 import { extname } from "node:path"
 import type { TuiPluginApi } from "@opencode-ai/plugin/tui"
 import {
   isTextFile,
   isImageFile,
   formatFileSize,
-  highlightLine,
   wrapLine,
   viewerWrapWidth,
   totalVisualRows,
   createSkin,
   openExternal,
+  readImageSize,
+  renderHighlighted,
   type Skin,
 } from "./viewer-utils"
 import type { FileNode } from "../file-tree/tree-utils"
-
-/** 读取图像尺寸（PNG 从文件头解析；其他格式返回 null） */
-function readImageSize(path: string): { width: number; height: number } | null {
-  try {
-    const fd = openSync(path, "r")
-    const buf = Buffer.alloc(24)
-    const n = readSync(fd, buf, 0, 24, 0)
-    closeSync(fd)
-    if (n >= 24 && buf.subarray(0, 8).toString("hex") === "89504e470d0a1a0a") {
-      return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) }
-    }
-    return null
-  } catch {
-    return null
-  }
-}
-
-/** 将一行文本按着色区间拆分为渲染片段（轻量着色薄封装，调用方不感知实现） */
-function renderHighlighted(line: string, fileExt: string, skin: Skin): JSX.Element[] {
-  const spans = highlightLine(line, fileExt)
-  if (spans.length === 0) return [line]
-  const parts: JSX.Element[] = []
-  let cursor = 0
-  for (const span of spans) {
-    if (span.start > cursor) parts.push(line.slice(cursor, span.start))
-    const color =
-      span.kind === "comment"
-        ? skin.muted
-        : span.kind === "string"
-          ? skin.success
-          : span.kind === "number"
-            ? skin.warning
-            : skin.accent
-    parts.push(
-      <span style={{ fg: color }}>{line.slice(span.start, span.end)}</span>,
-    )
-    cursor = span.end
-  }
-  if (cursor < line.length) parts.push(line.slice(cursor))
-  return parts
-}
 
 /** 文件查看器组件（去文件长度限制，完整渲染） */
 export function FileViewer(props: {
@@ -190,7 +150,9 @@ export function FileViewer(props: {
                           {chunkIndex() === 0 ? `${String(row.lineIndex + 1).padStart(4)}  ` : "      "}
                         </text>
                         <text fg={skin().text} wrapMode="none">
-                          {renderHighlighted(chunk, fileExt(), skin())}
+                          <For each={renderHighlighted(chunk, fileExt(), skin())}>
+                            {(part) => (part.color ? <span style={{ fg: part.color }}>{part.text}</span> : part.text)}
+                          </For>
                         </text>
                       </box>
                     )}

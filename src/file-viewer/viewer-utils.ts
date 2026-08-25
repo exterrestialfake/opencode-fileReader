@@ -202,3 +202,43 @@ export function createSkin(theme: TuiThemeCurrent): Skin {
     warning: ink(map, "warning", "#d7af5f"),
   }
 }
+
+/** 读取图像尺寸（PNG 从文件头解析；其他格式返回 null） */
+export function readImageSize(path: string): { width: number; height: number } | null {
+  try {
+    const fd = openSync(path, "r")
+    const buf = Buffer.alloc(24)
+    const n = readSync(fd, buf, 0, 24, 0)
+    closeSync(fd)
+    if (n >= 24 && buf.subarray(0, 8).toString("hex") === "89504e470d0a1a0a") {
+      return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) }
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+/** 将一行文本按着色区间拆分为渲染片段（轻量着色薄封装，调用方不感知实现） */
+export type HighlightedPart = { text: string; color?: string | RGBA }
+export function renderHighlighted(line: string, fileExt: string, skin: Skin): HighlightedPart[] {
+  const spans = highlightLine(line, fileExt)
+  if (spans.length === 0) return [{ text: line }]
+  const parts: HighlightedPart[] = []
+  let cursor = 0
+  for (const span of spans) {
+    if (span.start > cursor) parts.push({ text: line.slice(cursor, span.start) })
+    const color =
+      span.kind === "comment"
+        ? skin.muted
+        : span.kind === "string"
+          ? skin.success
+          : span.kind === "number"
+            ? skin.warning
+            : skin.accent
+    parts.push({ text: line.slice(span.start, span.end), color })
+    cursor = span.end
+  }
+  if (cursor < line.length) parts.push({ text: line.slice(cursor) })
+  return parts
+}

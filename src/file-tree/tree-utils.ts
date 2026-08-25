@@ -151,3 +151,32 @@ export function toggleExpanded(node: FileNode, expanded: Set<string>): Set<strin
   }
   return next
 }
+
+/** 生成树行前缀（一次计算，避免每行向后扫描整棵树） */
+export function createRowPrefixes(rows: FlatNode[], expandedSet: Set<string>): string[] {
+  const maxDepth = rows.reduce((max, row) => Math.max(max, row.depth), 0)
+  const nextAtOrShallower = Array.from({ length: maxDepth + 1 }, () => -1)
+  const laterSibling = rows.map(() => Array<boolean>(maxDepth + 1).fill(false))
+
+  for (let index = rows.length - 1; index >= 0; index -= 1) {
+    const row = rows[index]!
+    for (let depth = 0; depth <= row.depth; depth += 1) {
+      const next = nextAtOrShallower[depth]
+      laterSibling[index]![depth] = next !== -1 && rows[next]!.depth === depth
+    }
+    for (let depth = row.depth; depth <= maxDepth; depth += 1) {
+      nextAtOrShallower[depth] = index
+    }
+  }
+
+  return rows.map((row, index) => {
+    const indentation = Array.from({ length: row.depth }, (_, depth) => {
+      if (depth === 0 && !laterSibling[index]![0]) return " "
+      return laterSibling[index]![depth] ? "│  " : "   "
+    }).join("")
+    const topRoot = index === 0 && row.depth === 0
+    const branch = topRoot ? " " : laterSibling[index]![row.depth] ? "├─ " : "└─ "
+    const marker = row.node.type === "dir" ? (expandedSet.has(row.node.path) ? "▾ " : "▸ ") : ""
+    return `${indentation}${branch}${marker}`
+  })
+}
