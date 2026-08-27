@@ -2,13 +2,9 @@ import assert from "node:assert/strict"
 import { describe, test } from "node:test"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import {
-  formatFileSize,
-  highlightLine,
-  isImageFile,
-  isTextFile,
-  wrapLine,
-} from "../src/file-viewer/viewer-utils"
+import { formatFileSize, isImageFile, isTextFile } from "../src/file-utils/file"
+import { highlightLine } from "../src/highlight-utils/highlight"
+import { wrapLine } from "../src/layout-utils/layout"
 
 describe("file-viewer", () => {
   test("格式化文件大小", () => {

@@ -2,8 +2,8 @@ import assert from "node:assert/strict"
 import { describe, test } from "node:test"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { applyRefresh, type AutoRefreshDeps } from "../src/file-tree/auto-refresh"
-import { moveCursorIndex, visibleParentDir } from "../src/file-tree/cursor-utils"
+import { applyRefresh, type AutoRefreshDeps } from "../src/file-tree-utils/auto-refresh"
+import { moveCursorIndex, visibleParentDir } from "../src/file-tree-utils/cursor-utils"
 import {
   buildFileTree,
   findNodeByPath,
@@ -11,7 +11,7 @@ import {
   readDirEntries,
   refreshTree,
   type FileNode,
-} from "../src/file-tree/tree-utils"
+} from "../src/file-tree-utils/tree"
 
 describe("file-tree", () => {
   test("读取目录并保留隐藏文件（已去目录条目上限）", () => {

@@ -18,6 +18,12 @@ export type FlatNode = {
   depth: number
 }
 
+/** 刷新结果：tree 为刷新后的新树（根目录被删除时为 null）；validExpanded 为仍存在的已展开目录路径 */
+export type RefreshResult = {
+  tree: FileNode | null
+  validExpanded: Set<string>
+}
+
 /** 目录优先排序，同类型按名称排序（已内联为内部辅助，不再单独导出） */
 function sortEntries(a: FileNode, b: FileNode): number {
   if (a.type !== b.type) return a.type === "dir" ? -1 : 1
@@ -63,11 +69,7 @@ export function findNodeByPath(root: FileNode, path: string): FileNode | null {
   return null
 }
 
-/** 刷新结果：tree 为刷新后的新树（根目录被删除时为 null）；validExpanded 为仍存在的已展开目录路径 */
-export type RefreshResult = {
-  tree: FileNode | null
-  validExpanded: Set<string>
-}
+
 
 /**
  * 刷新文件树以反映外部文件系统变化（新增/删除/重命名）：

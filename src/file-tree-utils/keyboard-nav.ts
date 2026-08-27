@@ -3,7 +3,7 @@
 // 遵循 guidance/engineering_spec.md：函数加中文注释、错误信息中文、camelCase
 import type { TuiPluginApi } from "@opencode-ai/plugin/tui"
 import { moveCursorIndex, visibleParentDir } from "./cursor-utils"
-import type { FileNode, FlatNode } from "./tree-utils"
+import type { FileNode, FlatNode } from "./tree"
 
 /** 键盘导航层运行所需的树状态读写接口（由插件入口注入，本模块不感知 solid 信号实现） */
 export type TreeNavDeps = {

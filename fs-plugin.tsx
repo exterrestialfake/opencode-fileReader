@@ -4,14 +4,14 @@
 // 遵循 guidance/engineering_spec.md：组件 PascalCase、函数 camelCase、中文注释
 import { createSignal, onCleanup, Show } from "solid-js"
 import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@opencode-ai/plugin/tui"
-import { buildFileTree, flattenFileTree, toggleExpanded, type FileNode, type FlatNode } from "./src/file-tree/tree-utils"
-import { applyRefresh, startAutoRefresh, type AutoRefreshDeps } from "./src/file-tree/auto-refresh"
-import { registerTreeNavLayer } from "./src/file-tree/keyboard-nav"
+import { buildFileTree, flattenFileTree, toggleExpanded, type FileNode, type FlatNode } from "./src/file-tree-utils/tree"
+import { applyRefresh, startAutoRefresh, type AutoRefreshDeps } from "./src/file-tree-utils/auto-refresh"
+import { registerTreeNavLayer } from "./src/file-tree-utils/keyboard-nav"
 import { resolveBaseRoute, returnToBase } from "./src/plugin/route-utils"
-import { FileTree } from "./src/file-tree/FileTree"
-import { FileViewer } from "./src/file-viewer/FileViewer"
+import { FileTree } from "./src/FileTree"
+import { FileViewer } from "./src/FileViewer"
 import { resolveKeybinds } from "./src/config/index"
-import { tryOpenExternalIfNotText } from "./src/file-viewer/viewer-utils"
+import { tryOpenExternalIfNotText } from "./src/file-utils/file"
 
 /** 全屏查看路由名（与宿主保留路由 home/session 区分） */
 const VIEWER_ROUTE = "fs-viewer"

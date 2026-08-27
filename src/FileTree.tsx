@@ -4,8 +4,8 @@
 import { createEffect, createMemo, For } from "solid-js"
 import type { ScrollBoxRenderable } from "@opentui/core"
 import type { TuiPluginApi } from "@opencode-ai/plugin/tui"
-import { createRowPrefixes, flattenFileTree, type FileNode, type FlatNode } from "./tree-utils"
-import { createSkin, type Skin } from "../theme"
+import { createRowPrefixes, flattenFileTree, type FileNode, type FlatNode } from "./file-tree-utils/tree"
+import { createSkin, type Skin } from "./theme-utils/theme"
 
 /** 文件树组件（sidebar_content 槽位内容） */
 export function FileTree(props: {

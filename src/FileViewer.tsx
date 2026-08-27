@@ -13,15 +13,13 @@ import {
   isTextFile,
   isImageFile,
   formatFileSize,
-  wrapLine,
-  viewerWrapWidth,
-  totalVisualRows,
-  openExternal,
   readImageSize,
-  renderHighlighted,
-} from "./viewer-utils"
-import { createSkin, type Skin } from "../theme"
-import type { FileNode } from "../file-tree/tree-utils"
+  openExternal,
+} from "./file-utils/file"
+import { renderHighlighted } from "./highlight-utils/highlight"
+import { wrapLine, viewerWrapWidth } from "./layout-utils/layout"
+import { createSkin, type Skin } from "./theme-utils/theme"
+import type { FileNode } from "./file-tree-utils/tree"
 
 /** 文件查看器组件（去文件长度限制，完整渲染） */
 export function FileViewer(props: {
@@ -74,11 +72,11 @@ export function FileViewer(props: {
     }))
   })
 
-  // 总可视行数（滚动上限依据；汇总逻辑收敛到 viewer-utils.totalVisualRows）
+  // 总可视行数（滚动上限依据，直接内联求和）
   const totalRows = createMemo(() => {
     const w = wrappedLines()
     if (!w) return 0
-    return totalVisualRows(w)
+    return w.reduce((sum, row) => sum + row.chunks.length, 0)
   })
 
   const keys = createBindingLookup(viewerKeymap)

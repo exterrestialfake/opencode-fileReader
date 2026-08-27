@@ -11,11 +11,11 @@ import {
   toggleExpanded,
   type FileNode,
   type FlatNode,
-} from "../src/file-tree/tree-utils"
-import { applyRefresh, REFRESH_DEBOUNCE_MS, REFRESH_POLL_MS, startAutoRefresh, type AutoRefreshDeps } from "../src/file-tree/auto-refresh"
-import { registerTreeNavLayer, type TreeNavDeps } from "../src/file-tree/keyboard-nav"
+} from "../src/file-tree-utils/tree"
+import { applyRefresh, REFRESH_DEBOUNCE_MS, REFRESH_POLL_MS, startAutoRefresh, type AutoRefreshDeps } from "../src/file-tree-utils/auto-refresh"
+import { registerTreeNavLayer, type TreeNavDeps } from "../src/file-tree-utils/keyboard-nav"
 import { defaultKeymap, resolveKeybinds } from "../src/config/index"
-import { totalVisualRows, viewerWrapWidth, wrapLine } from "../src/file-viewer/viewer-utils"
+import { viewerWrapWidth, wrapLine } from "../src/layout-utils/layout"
 
 /** 等待条件成立（轮询 50ms），超时抛出中文错误 */
 async function waitFor(condition: () => boolean, timeoutMs: number): Promise<void> {
@@ -593,7 +593,7 @@ describe("行为测试：窄终端折行与可视行计算", () => {
     assert.deepEqual(wrapLine("\t" + "y".repeat(61), 32), ["    " + "y".repeat(28), "y".repeat(32), "y"])
   })
 
-  test("totalVisualRows 汇总多逻辑行的可视行数（滚动上限依据）", () => {
+  test("totalVisualRows 汇总多逻辑行的可视行数（滚动上限依据，逻辑已内联）", () => {
     // Given: 混合长度的逻辑行布局（4+1+1+2 个显示行）
     const layout = [
       { lineIndex: 0, chunks: wrapLine("x".repeat(100), 32) },
@@ -601,10 +601,11 @@ describe("行为测试：窄终端折行与可视行计算", () => {
       { lineIndex: 2, chunks: wrapLine("", 32) },
       { lineIndex: 3, chunks: wrapLine("y".repeat(64), 32) },
     ]
-    // When: 汇总总可视行数
+    // When: 按内联逻辑汇总总可视行数
     // Then: 总数为各块之和 8；滚动上限非负
-    assert.equal(totalVisualRows(layout), 8)
-    assert.equal(Math.max(0, totalVisualRows(layout) - 24), 0)
-    assert.equal(Math.max(0, totalVisualRows(layout) - 5), 3)
+    const totalRows = layout.reduce((sum, row) => sum + row.chunks.length, 0)
+    assert.equal(totalRows, 8)
+    assert.equal(Math.max(0, totalRows - 24), 0)
+    assert.equal(Math.max(0, totalRows - 5), 3)
   })
 })
