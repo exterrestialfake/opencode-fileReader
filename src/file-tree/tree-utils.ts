@@ -18,13 +18,8 @@ export type FlatNode = {
   depth: number
 }
 
-/** 判断是否为隐藏文件（`.` 开头）——默认可见，不做过滤 */
-export function isHiddenFile(name: string): boolean {
-  return name.startsWith(".")
-}
-
-/** 目录优先排序，同类型按名称排序 */
-export function sortEntries(a: FileNode, b: FileNode): number {
+/** 目录优先排序，同类型按名称排序（已内联为内部辅助，不再单独导出） */
+function sortEntries(a: FileNode, b: FileNode): number {
   if (a.type !== b.type) return a.type === "dir" ? -1 : 1
   return a.name.localeCompare(b.name)
 }
@@ -56,25 +51,7 @@ export function buildFileTree(root: string): FileNode {
   return { name: basename(root) || root, path: root, type: "dir", children: readDirEntries(root) }
 }
 
-/** 递归加载所有子目录（已移除节点上限） */
-export function expandAll(node: FileNode): void {
-  if (node.type !== "dir") return
-  if (!node.children) node.children = readDirEntries(node.path)
-  for (const child of node.children) expandAll(child)
-}
 
-/** 收集所有目录路径（用于默认展开状态） */
-export function collectDirPaths(node: FileNode): Set<string> {
-  const set = new Set<string>()
-  const walk = (n: FileNode) => {
-    if (n.type === "dir") {
-      set.add(n.path)
-      n.children?.forEach(walk)
-    }
-  }
-  walk(node)
-  return set
-}
 
 /** 在树中按路径查找节点（仅遍历已加载部分，折叠目录未加载子项自然不深入） */
 export function findNodeByPath(root: FileNode, path: string): FileNode | null {

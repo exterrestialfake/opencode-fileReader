@@ -16,12 +16,11 @@ import {
   wrapLine,
   viewerWrapWidth,
   totalVisualRows,
-  createSkin,
   openExternal,
   readImageSize,
   renderHighlighted,
-  type Skin,
 } from "./viewer-utils"
+import { createSkin, type Skin } from "../theme"
 import type { FileNode } from "../file-tree/tree-utils"
 
 /** 文件查看器组件（去文件长度限制，完整渲染） */

@@ -11,8 +11,7 @@ import { resolveBaseRoute, returnToBase } from "./src/plugin/route-utils"
 import { FileTree } from "./src/file-tree/FileTree"
 import { FileViewer } from "./src/file-viewer/FileViewer"
 import { resolveKeybinds } from "./src/config/index"
-import { isTextFile } from "./src/file-viewer/viewer-utils"
-import { spawn } from "node:child_process"
+import { tryOpenExternalIfNotText } from "./src/file-viewer/viewer-utils"
 
 /** 全屏查看路由名（与宿主保留路由 home/session 区分） */
 const VIEWER_ROUTE = "fs-viewer"
@@ -48,10 +47,6 @@ function openFile(api: TuiPluginApi, node: FileNode) {
 }
 
 /** 用系统默认查看器打开文件（win32，已验证模式） */
-function openExternal(filePath: string) {
-  spawn("explorer.exe", [filePath], { detached: true, stdio: "ignore", windowsHide: true }).unref()
-}
-
 /** 当前可见行（基于展开状态扁平化，供键盘导航与 fs.open 起点计算） */
 function visibleRows(): FlatNode[] {
   const root = tree()
@@ -206,8 +201,7 @@ const tui: TuiPlugin = async (api, options) => {
     ],
   })
 
-  // 合并后的 enter 打开（仅 viewer 模式，原 fs.cursorOpen 已并入 fs.open，逻辑保持不变）
-  // 未路由时回车归还给输入框，仅 ctrl+o 可打开；与全局 fs.open 的 ctrl+o 关闭逻辑分离，避免劫持提示词
+  // 合并后的 enter 打开（仅 viewer 模式，原 fs.cursorOpen 已并入 fs.open 语义，逻辑保持不变）
   api.keymap.registerLayer({
     mode: VIEWER_MODE,
     priority: 10,
@@ -221,10 +215,7 @@ const tui: TuiPlugin = async (api, options) => {
             toggleDir(node)
             return
           }
-          if (!isTextFile(node.name, node.path)) {
-            openExternal(node.path)
-            return
-          }
+          if (tryOpenExternalIfNotText(node.name, node.path)) return
           openFile(api, node)
         },
       },

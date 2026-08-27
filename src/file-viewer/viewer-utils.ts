@@ -4,25 +4,13 @@ import { spawn } from "node:child_process"
 import { openSync, readSync, closeSync } from "node:fs"
 import { extname } from "node:path"
 import { RGBA } from "@opentui/core"
-import type { TuiThemeCurrent } from "@opencode-ai/plugin/tui"
+import type { Skin } from "../theme"
 
 /** 轻量着色区间（接口稳定，日后可替换为完整语法高亮实现） */
 export type HighlightSpan = {
   start: number
   end: number
   kind: "keyword" | "comment" | "string" | "number"
-}
-
-/** 主题色皮肤（从 api.theme.current 提取，跟随主题） */
-export type Skin = {
-  panel: RGBA | string
-  border: RGBA | string
-  text: RGBA | string
-  muted: RGBA | string
-  accent: RGBA | string
-  selected: RGBA | string
-  success: RGBA | string
-  warning: RGBA | string
 }
 
 /** 格式化文件大小（B/KB/MB/GB） */
@@ -69,9 +57,16 @@ export function isImageFile(name: string): boolean {
   return IMAGE_EXTS.has(extname(name).slice(1).toLowerCase())
 }
 
-/** 用系统默认查看器打开文件（win32，已验证模式；键盘导航与查看器共用） */
+/** 用系统默认查看器打开文件（win32，已验证模式） */
 export function openExternal(filePath: string) {
   spawn("explorer.exe", [filePath], { detached: true, stdio: "ignore", windowsHide: true }).unref()
+}
+
+/** 若文件为非文本则用系统查看器打开并返回是否已打开（与 isTextFile 合并后的简洁 API，供键盘导航复用） */
+export function tryOpenExternalIfNotText(fileName: string, filePath: string): boolean {
+  if (isTextFile(fileName, filePath)) return false
+  openExternal(filePath)
+  return true
 }
 
 /** 常见编程语言关键词（轻量正则匹配用） */
@@ -178,29 +173,6 @@ export function viewerWrapWidth(viewportWidth: number, termWidth: number): numbe
 /** 汇总折行布局的总可视行数（滚动上限计算依据）；从 FileViewer 原样提取，仅为可测性导出 */
 export function totalVisualRows(rows: { chunks: string[] }[]): number {
   return rows.reduce((sum, row) => sum + row.chunks.length, 0)
-}
-
-/** 从主题中提取颜色（兼容 RGBA 与字符串） */
-function ink(map: Record<string, unknown>, name: string, fallback: string): RGBA | string {
-  const value = map[name]
-  if (typeof value === "string") return value
-  if (value instanceof RGBA) return value
-  return fallback
-}
-
-/** 创建主题皮肤（面板背景/文字跟随主题） */
-export function createSkin(theme: TuiThemeCurrent): Skin {
-  const map = theme as unknown as Record<string, unknown>
-  return {
-    panel: ink(map, "backgroundPanel", "#1d1d1d"),
-    border: ink(map, "border", "#4a4a4a"),
-    text: ink(map, "text", "#f0f0f0"),
-    muted: ink(map, "textMuted", "#a5a5a5"),
-    accent: ink(map, "primary", "#5f87ff"),
-    selected: ink(map, "selectedListItemText", "#f0f0f0"),
-    success: ink(map, "success", "#87d787"),
-    warning: ink(map, "warning", "#d7af5f"),
-  }
 }
 
 /** 读取图像尺寸（PNG 从文件头解析；其他格式返回 null） */

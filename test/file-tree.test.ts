@@ -8,26 +8,12 @@ import {
   buildFileTree,
   findNodeByPath,
   flattenFileTree,
-  isHiddenFile,
   readDirEntries,
   refreshTree,
-  sortEntries,
   type FileNode,
 } from "../src/file-tree/tree-utils"
 
 describe("file-tree", () => {
-  test("识别隐藏文件且默认不隐藏", () => {
-    assert.equal(isHiddenFile(".env"), true)
-    assert.equal(isHiddenFile("config.json"), false)
-  })
-
-  test("目录优先排序", () => {
-    const directory: FileNode = { name: "dir", path: "dir", type: "dir" }
-    const file: FileNode = { name: "file", path: "file", type: "file" }
-    assert.ok(sortEntries(directory, file) < 0)
-    assert.ok(sortEntries(file, directory) > 0)
-  })
-
   test("读取目录并保留隐藏文件（已去目录条目上限）", () => {
     const root = mkdtempSync(join(process.cwd(), "file-tree-"))
     try {
