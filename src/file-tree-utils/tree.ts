@@ -1,4 +1,4 @@
-// src/file-tree/tree-utils.ts — 文件树纯函数（无目录/节点上限，去限制后的版本）
+// src/file-tree-utils/tree.ts — 文件树纯函数（无目录/节点上限，去限制后的版本）
 // 遵循 guidance/engineering_spec.md：函数加中文注释、错误信息中文、camelCase
 import { readdirSync, statSync } from "node:fs"
 import { join, basename } from "node:path"

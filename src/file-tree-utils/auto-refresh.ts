@@ -1,4 +1,4 @@
-// src/file-tree/auto-refresh.ts — 文件树自动刷新（fs.watch 递归监听 + 轮询保底）
+// src/file-tree-utils/auto-refresh.ts — 文件树自动刷新（fs.watch 递归监听 + 轮询保底）
 // 遵循 guidance/engineering_spec.md：函数加中文注释、错误信息中文、camelCase
 import { existsSync, statSync, watch, type FSWatcher } from "node:fs"
 import { buildFileTree, findNodeByPath, refreshTree, type FileNode } from "./tree"

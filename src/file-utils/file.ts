@@ -1,8 +1,8 @@
-// src/file-utils/file.ts — 文件相关工具（类型判定、外部打开、尺寸）
+// src/file-utils/file.ts — 文件相关工具（类型判定、外部打开、尺寸、文件操作）
 // 遵循 guidance/engineering_spec.md：函数加中文注释、错误信息中文
 import { spawn } from "node:child_process"
-import { openSync, readSync, closeSync } from "node:fs"
-import { extname } from "node:path"
+import { closeSync, mkdirSync, openSync, readSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs"
+import { dirname, extname, join } from "node:path"
 
 /** 文本文件扩展名集合 */
 const TEXT_EXTS = new Set([
@@ -73,5 +73,107 @@ export function readImageSize(path: string): { width: number; height: number } |
     return null
   } catch {
     return null
+  }
+}
+
+/** Windows 保留名（不区分大小写，去扩展名后判定） */
+const RESERVED_NAMES = new Set([
+  "CON", "PRN", "AUX", "NUL",
+  "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+  "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+])
+
+/**
+ * 校验文件名是否合法
+ * @param name 用户输入的文件名（不含路径）
+ * @param siblingNames 同级已存在的文件名列表，用于重名检测
+ * @returns null 表示通过，否则返回中文错误信息
+ */
+export function validateFileName(name: string, siblingNames: string[]): string | null {
+  if (name.length === 0 || name.trim().length === 0) return "文件名不能为空"
+  if (name === "." || name === "..") return "文件名不能为 . 或 .."
+  if (/[\/\\:*?"<>|]/.test(name)) return "文件名不能包含 / \\ : * ? \" < > |"
+  if (name.endsWith(" ") || name.endsWith(".")) return "文件名末尾不能是空格或点"
+  const base = name.split(".")[0]!.toUpperCase()
+  if (RESERVED_NAMES.has(base)) return "保留名称不可用"
+  if (name.length > 255) return "文件名过长"
+  const lower = name.toLowerCase()
+  for (const s of siblingNames) {
+    if (s.toLowerCase() === lower) return "同目录已存在同名文件"
+  }
+  return null
+}
+
+/** 将 fs 错误码映射为中文提示 */
+function mapFsError(e: unknown, fallback: string): string {
+  const code = (e as NodeJS.ErrnoException)?.code
+  if (code === "EEXIST") return "同目录已存在同名文件"
+  if (code === "EACCES" || code === "EPERM") return "权限不足，无法完成操作"
+  if (code === "EBUSY") return "文件被占用，无法完成操作"
+  if (code === "ENOSPC") return "磁盘空间不足"
+  if (code === "ENOENT") return "路径不存在"
+  const msg = (e as Error)?.message
+  return msg ? `${fallback}：${msg}` : fallback
+}
+
+/**
+ * 在父目录下创建空文件
+ */
+export function createFileAt(parentDir: string, name: string): { ok: true, path: string } | { ok: false, error: string } {
+  const target = join(parentDir, name)
+  try {
+    writeFileSync(target, "", { flag: "wx" })
+    return { ok: true, path: target }
+  } catch (e) {
+    return { ok: false, error: mapFsError(e, "创建文件失败") }
+  }
+}
+
+/**
+ * 在父目录下创建文件夹
+ */
+export function createFolderAt(parentDir: string, name: string): { ok: true, path: string } | { ok: false, error: string } {
+  const target = join(parentDir, name)
+  try {
+    mkdirSync(target)
+    return { ok: true, path: target }
+  } catch (e) {
+    return { ok: false, error: mapFsError(e, "创建文件夹失败") }
+  }
+}
+
+/**
+ * 重命名文件或目录
+ */
+export function renameAt(oldPath: string, newName: string): { ok: true, path: string } | { ok: false, error: string } {
+  const target = join(dirname(oldPath), newName)
+  try {
+    renameSync(oldPath, target)
+    return { ok: true, path: target }
+  } catch (e) {
+    return { ok: false, error: mapFsError(e, "重命名失败") }
+  }
+}
+
+/**
+ * 删除文件或目录（目录递归删除）
+ */
+export function removeAt(targetPath: string): { ok: true } | { ok: false, error: string } {
+  try {
+    rmSync(targetPath, { recursive: true, force: true })
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: mapFsError(e, "删除失败") }
+  }
+}
+
+/**
+ * 获取指定路径的同级文件名列表（用于重名校验）
+ */
+export function getSiblingNames(parentDir: string): string[] {
+  try {
+    return readdirSync(parentDir)
+  } catch {
+    return []
   }
 }

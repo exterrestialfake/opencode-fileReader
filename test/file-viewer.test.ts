@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import { describe, test } from "node:test"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { formatFileSize, isImageFile, isTextFile } from "../src/file-utils/file"
+import { createFileAt, createFolderAt, formatFileSize, isImageFile, isTextFile, removeAt, renameAt, validateFileName } from "../src/file-utils/file"
 import { highlightLine } from "../src/highlight-utils/highlight"
 import { wrapLine } from "../src/layout-utils/layout"
 
@@ -50,5 +50,47 @@ describe("file-viewer", () => {
     assert.equal(wrapLine("\thello", 4).join(""), "    hello")
     assert.deepEqual(wrapLine("hello", 0), ["hello"])
     assert.deepEqual(wrapLine("1234", 4), ["1234"])
+  })
+
+  test("校验文件名覆盖 Q10 全表", () => {
+    assert.equal(validateFileName("", []), "文件名不能为空")
+    assert.equal(validateFileName("   ", []), "文件名不能为空")
+    assert.equal(validateFileName(".", []), "文件名不能为 . 或 ..")
+    assert.equal(validateFileName("..", []), "文件名不能为 . 或 ..")
+    assert.equal(validateFileName("a/b", []), "文件名不能包含 / \\ : * ? \" < > |")
+    assert.equal(validateFileName("a\\b", []), "文件名不能包含 / \\ : * ? \" < > |")
+    assert.equal(validateFileName("a:b", []), "文件名不能包含 / \\ : * ? \" < > |")
+    assert.equal(validateFileName("a ", []), "文件名末尾不能是空格或点")
+    assert.equal(validateFileName("a.", []), "文件名末尾不能是空格或点")
+    assert.equal(validateFileName("CON", []), "保留名称不可用")
+    assert.equal(validateFileName("con.txt", []), "保留名称不可用")
+    assert.equal(validateFileName("NUL", []), "保留名称不可用")
+    assert.equal(validateFileName("a".repeat(256), []), "文件名过长")
+    assert.equal(validateFileName("exists.txt", ["exists.txt"]), "同目录已存在同名文件")
+    assert.equal(validateFileName("Exists.TXT", ["exists.txt"]), "同目录已存在同名文件")
+    assert.equal(validateFileName("good-name_123.txt", ["other.txt"]), null)
+  })
+
+  test("文件操作纯函数在临时目录可用", () => {
+    const root = mkdtempSync(join(process.cwd(), "file-ops-"))
+    try {
+      // 创建文件
+      const f1 = createFileAt(root, "a.txt")
+      assert.equal(f1.ok, true)
+      // 重复创建应失败
+      const f2 = createFileAt(root, "a.txt")
+      assert.equal(f2.ok, false)
+      // 创建文件夹
+      const d1 = createFolderAt(root, "dir")
+      assert.equal(d1.ok, true)
+      // 重命名
+      const r1 = renameAt(join(root, "a.txt"), "b.txt")
+      assert.equal(r1.ok, true)
+      // 删除
+      const rm = removeAt(join(root, "b.txt"))
+      assert.equal(rm.ok, true)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 })

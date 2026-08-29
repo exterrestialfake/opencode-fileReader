@@ -3,7 +3,7 @@ import { describe, test } from "node:test"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import type { TuiPluginApi } from "@opencode-ai/plugin/tui"
-import { resolveBaseRoute, returnToBase } from "../src/plugin/route-utils"
+import { resolveBaseRoute, returnToBase } from "../src/route-utils/route"
 import {
   buildFileTree,
   findNodeByPath,

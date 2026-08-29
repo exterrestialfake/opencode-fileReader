@@ -12,6 +12,10 @@
     "fs.viewer.down": "down",
     "fs.viewer.pageup": "pageup",
     "fs.viewer.pagedown": "pagedown",
-    "fs.viewer.open": "enter,return"
+    "fs.viewer.open": "enter,return",
+    "fs.createFile": "ctrl+n",
+    "fs.createFolder": "ctrl+alt+n",
+    "fs.rename": "ctrl+f2",
+    "fs.delete": "delete"
   }
 }

@@ -1,4 +1,4 @@
-// src/file-tree/keyboard-nav.ts — 文件树键盘导航层（ctrl+up 上移、ctrl+down 下移、ctrl+left 折叠、ctrl+right 展开）
+// src/file-tree-utils/keyboard-nav.ts — 文件树键盘导航层（ctrl+up 上移、ctrl+down 下移、ctrl+left 折叠、ctrl+right 展开）
 // 2026/8/24 19:41 enter 已合并至 fs.open（fs-plugin 全局 ctrl+o + viewer 模式 enter），本模块不再注册打开
 // 遵循 guidance/engineering_spec.md：函数加中文注释、错误信息中文、camelCase
 import type { TuiPluginApi } from "@opencode-ai/plugin/tui"

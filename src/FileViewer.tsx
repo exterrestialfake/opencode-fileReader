@@ -1,5 +1,5 @@
 /** @jsxImportSource @opentui/solid */
-// src/file-viewer/FileViewer.tsx — 文件查看器独立模块（全屏路由分栏中的代码区）
+// src/FileViewer.tsx — 文件查看器组件（全屏路由分栏中的代码区）
 // 遵循 guidance/engineering_spec.md：组件 PascalCase、函数 camelCase、中文注释
 import { createMemo, For, Show } from "solid-js"
 import { useBindings } from "@opentui/keymap/solid"
@@ -57,7 +57,7 @@ export function FileViewer(props: {
     isImageFile(props.file.name) ? readImageSize(props.file.path) : null,
   )
 
-  // 自动折行：按视口宽度将逻辑行切为显示行（宽度推导收敛到 viewer-utils.viewerWrapWidth）
+  // 自动折行：按视口宽度将逻辑行切为显示行（宽度推导收敛到 layout-utils.viewerWrapWidth）
   const wrappedLines = createMemo<
     { lineIndex: number; chunks: string[] }[] | null
   >(() => {

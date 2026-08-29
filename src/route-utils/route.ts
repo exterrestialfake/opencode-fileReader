@@ -1,4 +1,4 @@
-// src/plugin/route-utils.ts — 路由往返纯函数（记录来源路由与返回来源界面）
+// src/route-utils/route.ts — 路由往返纯函数（记录来源路由与返回来源界面）
 // 从 fs-plugin.tsx 的 openFile/closeViewer 中原样提取，仅为可测性导出（行为不变）：
 // fs-plugin.tsx 含 JSX 与 TUI 运行时导入，无法在 node:test 中加载，故将纯决策逻辑下沉到本模块。
 // 遵循 guidance/engineering_spec.md：函数加中文注释、错误信息中文、camelCase

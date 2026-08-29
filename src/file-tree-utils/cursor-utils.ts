@@ -1,4 +1,4 @@
-// src/file-tree/cursor-utils.ts — 文件树键盘光标纯函数（基于可见行下标的移动与父目录定位）
+// src/file-tree-utils/cursor-utils.ts — 文件树键盘光标纯函数（基于可见行下标的移动与父目录定位）
 // 遵循 guidance/engineering_spec.md：函数加中文注释、错误信息中文、camelCase
 import { dirname } from "node:path"
 import type { FileNode, FlatNode } from "./tree"

@@ -1,17 +1,19 @@
 /** @jsxImportSource @opentui/solid */
 // fs-plugin.tsx — 兼容入口（转发至模块化实现）
-// 实际实现已拆至 src/file-tree、src/file-viewer、src/config；本文件保留以兼容 tui.test.json 的 file:// 指向
+// 实际实现已拆至 src 根组件、各类 -utils 与 src/config；本文件保留以兼容 tui.test.json 的 file:// 指向
 // 遵循 guidance/engineering_spec.md：组件 PascalCase、函数 camelCase、中文注释
 import { createSignal, onCleanup, Show } from "solid-js"
 import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@opencode-ai/plugin/tui"
 import { buildFileTree, flattenFileTree, toggleExpanded, type FileNode, type FlatNode } from "./src/file-tree-utils/tree"
 import { applyRefresh, startAutoRefresh, type AutoRefreshDeps } from "./src/file-tree-utils/auto-refresh"
 import { registerTreeNavLayer } from "./src/file-tree-utils/keyboard-nav"
-import { resolveBaseRoute, returnToBase } from "./src/plugin/route-utils"
-import { FileTree } from "./src/FileTree"
+import { resolveBaseRoute, returnToBase } from "./src/route-utils/route"
+import { FileTree, type EditingState } from "./src/FileTree"
 import { FileViewer } from "./src/FileViewer"
 import { resolveKeybinds } from "./src/config/index"
-import { tryOpenExternalIfNotText } from "./src/file-utils/file"
+import { createFileAt, createFolderAt, getSiblingNames, removeAt, renameAt, tryOpenExternalIfNotText, validateFileName } from "./src/file-utils/file"
+import { dirname, extname, join } from "node:path"
+import { readdirSync, statSync } from "node:fs"
 
 /** 全屏查看路由名（与宿主保留路由 home/session 区分） */
 const VIEWER_ROUTE = "fs-viewer"
@@ -24,10 +26,12 @@ const [visible, setVisible] = createSignal(true)
 const [tree, setTree] = createSignal<FileNode | null>(null)
 const [expanded, setExpanded] = createSignal<Set<string>>(new Set())
 const [selected, setSelected] = createSignal<FileNode | null>(null)
+/** inline 编辑状态（新建/重命名） */
+const [editing, setEditing] = createSignal<EditingState | null>(null)
 /** 打开查看器前的来源路由（用于关闭时返回） */
 const [baseRoute, setBaseRoute] = createSignal<{ name: string; sessionID?: string }>({ name: "home" })
 
-/** 切换目录展开/折叠（展开时懒加载子目录，已移除节点上限；集合更新逻辑下沉至 tree-utils.toggleExpanded） */
+/** 切换目录展开/折叠（展开时懒加载子目录，已移除节点上限；集合更新逻辑下沉至 file-tree-utils/tree.toggleExpanded） */
 function toggleDir(node: FileNode) {
   // 文件夹也应赋予光标，方便键盘继续控制
   setSelected(node)
@@ -51,6 +55,279 @@ function openFile(api: TuiPluginApi, node: FileNode) {
 function visibleRows(): FlatNode[] {
   const root = tree()
   return root ? flattenFileTree(root, expanded()) : []
+}
+
+/** 获取新建操作的父目录（选中为文件时取其父目录，选中为目录时取自身，否则取根） */
+function getParentDirForCreate(): string {
+  const cur = selected()
+  const root = tree()
+  if (!root) return ""
+  if (!cur) return root.path
+  if (cur.type === "dir") return cur.path
+  return dirname(cur.path)
+}
+
+let popInlineEdit: (() => void) | null = null
+function pushInlineEditMode(api: TuiPluginApi) {
+  if (popInlineEdit) return
+  popInlineEdit = api.mode.push("fs-plugin.inline-edit")
+}
+function popInlineEditMode() {
+  if (!popInlineEdit) return
+  try { popInlineEdit() } catch {}
+  popInlineEdit = null
+}
+
+/** 取消 inline 编辑（失焦或 Esc） */
+function cancelEditing(api?: TuiPluginApi) {
+  setEditing(null)
+  popInlineEditMode()
+}
+
+/** 实时校验：根据当前 editing.value 与同级文件名更新 error */
+function updateEditingError() {
+  const e = editing()
+  if (!e) return
+  const siblings = getSiblingNames(e.parentPath)
+  // 重命名时排除自身
+  const filtered = e.kind === "rename" && e.targetPath ? siblings.filter((n) => join(e.parentPath, n) !== e.targetPath) : siblings
+  const err = validateFileName(e.value, filtered)
+  if (err !== e.error) setEditing({ ...e, error: err })
+}
+
+/** 提交 inline 编辑（Enter） */
+function submitEditing(api: TuiPluginApi) {
+  const e = editing()
+  if (!e) {
+    popInlineEditMode()
+    return
+  }
+  if (e.error) return
+  const trimmed = e.value.trim()
+  // 再次校验空
+  if (trimmed.length === 0) {
+    setEditing({ ...e, error: "文件名不能为空" })
+    return
+  }
+  if (e.kind === "createFile") {
+    const res = createFileAt(e.parentPath, trimmed)
+    if (!res.ok) {
+      setEditing({ ...e, error: res.error })
+      api.ui.dialog.replace(() => <api.ui.DialogAlert title="创建失败" message={res.error} onConfirm={() => api.ui.dialog.clear()} />)
+      return
+    }
+    setEditing(null)
+    // 确保父目录展开
+    if (!expanded().has(e.parentPath)) setExpanded(new Set([...expanded(), e.parentPath]))
+    if (tree()) applyRefresh({ getTree: () => tree()!, getExpanded: () => expanded(), setTree, setExpanded, getSelected: () => selected(), setSelected, rootDir: () => tree()!.path } as unknown as AutoRefreshDeps)
+    else {
+      const root = buildFileTree(e.parentPath)
+      setTree(root)
+    }
+    popInlineEditMode()
+    // 选中新文件
+    const newPath = join(e.parentPath, trimmed)
+    // 尝试在新树中找到节点
+    const rootNode = tree()
+    if (rootNode) {
+      const walk = (node: FileNode): FileNode | null => {
+        if (node.path === newPath) return node
+        for (const c of node.children ?? []) { const hit = walk(c); if (hit) return hit }
+        return null
+      }
+      const hit = walk(rootNode)
+      if (hit) setSelected(hit)
+    }
+  } else if (e.kind === "createFolder") {
+    const res = createFolderAt(e.parentPath, trimmed)
+    if (!res.ok) {
+      setEditing({ ...e, error: res.error })
+      api.ui.dialog.replace(() => <api.ui.DialogAlert title="创建失败" message={res.error} onConfirm={() => api.ui.dialog.clear()} />)
+      return
+    }
+    setEditing(null)
+    popInlineEditMode()
+    if (!expanded().has(e.parentPath)) setExpanded(new Set([...expanded(), e.parentPath]))
+    if (tree()) applyRefresh({ getTree: () => tree()!, getExpanded: () => expanded(), setTree, setExpanded, getSelected: () => selected(), setSelected, rootDir: () => tree()!.path } as unknown as AutoRefreshDeps)
+    const newPath = join(e.parentPath, trimmed)
+    const rootNode = tree()
+    if (rootNode) {
+      const walk = (node: FileNode): FileNode | null => {
+        if (node.path === newPath) return node
+        for (const c of node.children ?? []) { const hit = walk(c); if (hit) return hit }
+        return null
+      }
+      const hit = walk(rootNode)
+      if (hit) setSelected(hit)
+    }
+  } else if (e.kind === "rename") {
+    const oldPath = e.targetPath!
+    const res = renameAt(oldPath, trimmed)
+    if (!res.ok) {
+      setEditing({ ...e, error: res.error })
+      api.ui.dialog.replace(() => <api.ui.DialogAlert title="重命名失败" message={res.error} onConfirm={() => api.ui.dialog.clear()} />)
+      return
+    }
+    setEditing(null)
+    popInlineEditMode()
+    if (tree()) applyRefresh({ getTree: () => tree()!, getExpanded: () => expanded(), setTree, setExpanded, getSelected: () => selected(), setSelected, rootDir: () => tree()!.path } as unknown as AutoRefreshDeps)
+    const newPath = join(e.parentPath, trimmed)
+    const rootNode = tree()
+    if (rootNode) {
+      const walk = (node: FileNode): FileNode | null => {
+        if (node.path === newPath) return node
+        for (const c of node.children ?? []) { const hit = walk(c); if (hit) return hit }
+        return null
+      }
+      const hit = walk(rootNode)
+      if (hit) setSelected(hit)
+    }
+  }
+}
+
+/** 生成不冲突的默认名（带序号递增） */
+function uniqueDefaultName(parent: string, base: string): string {
+  const siblings = new Set(getSiblingNames(parent).map(s => s.toLowerCase()))
+  if (!siblings.has(base.toLowerCase())) return base
+  const dot = base.lastIndexOf(".")
+  const namePart = dot > 0 ? base.slice(0, dot) : base
+  const extPart = dot > 0 ? base.slice(dot) : ""
+  for (let i = 1; i < 100; i++) {
+    const cand = `${namePart} (${i})${extPart}`
+    if (!siblings.has(cand.toLowerCase())) return cand
+  }
+  return base
+}
+
+/** 开始新建文件：立即落盘并进入重命名（按用户要求：ctrl+n 后直接出现文件，只需改名） */
+function startCreateFile(api?: TuiPluginApi) {
+  const parent = getParentDirForCreate()
+  if (!parent) {
+    if (api) api.ui.dialog.replace(() => <api.ui.DialogAlert title="无法创建" message="当前无可用目录" onConfirm={() => api.ui.dialog.clear()} />)
+    return
+  }
+  const name = uniqueDefaultName(parent, "默认文件.txt")
+  const res = createFileAt(parent, name)
+  if (!res.ok) {
+    if (api) api.ui.dialog.replace(() => <api.ui.DialogAlert title="创建失败" message={res.error} onConfirm={() => api.ui.dialog.clear()} />)
+    return
+  }
+  if (!expanded().has(parent)) setExpanded(new Set([...expanded(), parent]))
+  if (tree()) applyRefresh({ getTree: () => tree()!, getExpanded: () => expanded(), setTree, setExpanded, getSelected: () => selected(), setSelected, rootDir: () => tree()!.path } as unknown as AutoRefreshDeps)
+  else setTree(buildFileTree(parent))
+  const newPath = join(parent, name)
+  const rootNode = tree()
+  if (rootNode) {
+    const walk = (node: FileNode): FileNode | null => {
+      if (node.path === newPath) return node
+      for (const c of node.children ?? []) { const hit = walk(c); if (hit) return hit }
+      return null
+    }
+    const hit = walk(rootNode)
+    if (hit) setSelected(hit)
+  } else {
+    // 兜底：若树重建失败仍尝试选中
+    setSelected({ name, path: newPath, type: "file" } as FileNode)
+  }
+  setEditing({ kind: "rename", targetPath: newPath, parentPath: parent, value: name, error: null })
+  updateEditingError()
+  if (api) pushInlineEditMode(api)
+}
+
+/** 开始新建文件夹：立即落盘并进入重命名 */
+function startCreateFolder(api?: TuiPluginApi) {
+  const parent = getParentDirForCreate()
+  if (!parent) {
+    if (api) api.ui.dialog.replace(() => <api.ui.DialogAlert title="无法创建" message="当前无可用目录" onConfirm={() => api.ui.dialog.clear()} />)
+    return
+  }
+  const name = uniqueDefaultName(parent, "默认文件夹")
+  const res = createFolderAt(parent, name)
+  if (!res.ok) {
+    if (api) api.ui.dialog.replace(() => <api.ui.DialogAlert title="创建失败" message={res.error} onConfirm={() => api.ui.dialog.clear()} />)
+    return
+  }
+  if (!expanded().has(parent)) setExpanded(new Set([...expanded(), parent]))
+  if (tree()) applyRefresh({ getTree: () => tree()!, getExpanded: () => expanded(), setTree, setExpanded, getSelected: () => selected(), setSelected, rootDir: () => tree()!.path } as unknown as AutoRefreshDeps)
+  else setTree(buildFileTree(parent))
+  const newPath = join(parent, name)
+  const rootNode = tree()
+  if (rootNode) {
+    const walk = (node: FileNode): FileNode | null => {
+      if (node.path === newPath) return node
+      for (const c of node.children ?? []) { const hit = walk(c); if (hit) return hit }
+      return null
+    }
+    const hit = walk(rootNode)
+    if (hit) setSelected(hit)
+  }
+  setEditing({ kind: "rename", targetPath: newPath, parentPath: parent, value: name, error: null })
+  updateEditingError()
+  if (api) pushInlineEditMode(api)
+}
+
+/** 开始重命名 */
+function startRename(api?: TuiPluginApi) {
+  const cur = selected()
+  if (!cur) return
+  const root = tree()
+  if (root && cur.path === root.path) return
+  const parent = dirname(cur.path)
+  setEditing({ kind: "rename", targetPath: cur.path, parentPath: parent, value: cur.name, error: null })
+  updateEditingError()
+  if (api) pushInlineEditMode(api)
+}
+
+/** 执行删除（弹 confirm） */
+function executeDelete(api: TuiPluginApi) {
+  const cur = selected()
+  if (!cur) return
+  const root = tree()
+  if (root && cur.path === root.path) {
+    api.ui.dialog.replace(() => <api.ui.DialogAlert title="无法删除" message="不能对根目录执行此操作" onConfirm={() => api.ui.dialog.clear()} />)
+    return
+  }
+  const isDir = cur.type === "dir"
+  let count = 0
+  if (isDir) {
+    try {
+      const entries = readdirSync(cur.path)
+      count = entries.length
+    } catch { count = 0 }
+  }
+  const message = isDir
+    ? (count === 0 ? `确定删除空文件夹“${cur.name}”？` : `确定删除“${cur.name}”及其 ${count} 项内容？此操作不可撤销。`)
+    : `确定删除文件“${cur.name}”？此操作不可撤销。`
+  api.ui.dialog.replace(() => (
+    <api.ui.DialogConfirm
+      title="确认删除"
+      message={message}
+      onConfirm={() => {
+        api.ui.dialog.clear()
+        const res = removeAt(cur.path)
+        if (!res.ok) {
+          api.ui.dialog.replace(() => <api.ui.DialogAlert title="删除失败" message={res.error} onConfirm={() => api.ui.dialog.clear()} />)
+          return
+        }
+        // 成功后刷新，选中回落父目录
+        const parent = dirname(cur.path)
+        if (tree()) applyRefresh({ getTree: () => tree()!, getExpanded: () => expanded(), setTree, setExpanded, getSelected: () => selected(), setSelected, rootDir: () => tree()!.path } as unknown as AutoRefreshDeps)
+        // 选中回落
+        const rootNode = tree()
+        if (rootNode) {
+          const walk = (node: FileNode): FileNode | null => {
+            if (node.path === parent) return node
+            for (const c of node.children ?? []) { const hit = walk(c); if (hit) return hit }
+            return null
+          }
+          const hit = walk(rootNode)
+          if (hit) setSelected(hit)
+          else setSelected(rootNode.children?.[0] ?? null)
+        }
+      }}
+      onCancel={() => api.ui.dialog.clear()}
+    />
+  ))
 }
 
 /** 关闭查看器并返回来源界面（会话或主页；返回决策下沉至 route-utils.returnToBase） */
@@ -101,6 +378,14 @@ const tui: TuiPlugin = async (api, options) => {
   })
 
   // 注册侧边栏槽位（order 600，内置 files 500 之后）
+  const handleEditingChange = (value: string) => {
+    const e = editing()
+    if (!e) return
+    const siblings = getSiblingNames(e.parentPath)
+    const filtered = e.kind === "rename" && e.targetPath ? siblings.filter((n) => join(e.parentPath, n) !== e.targetPath) : siblings
+    const err = validateFileName(value, filtered)
+    setEditing({ ...e, value, error: err })
+  }
   api.slots.register({
     order: 600,
     slots: {
@@ -113,6 +398,10 @@ const tui: TuiPlugin = async (api, options) => {
             selected={selected}
             onToggleDir={toggleDir}
             onOpenFile={(node) => openFile(api, node)}
+            editing={editing}
+            onEditingChange={handleEditingChange}
+            onEditingSubmit={() => submitEditing(api)}
+            onEditingCancel={cancelEditing}
           />
         ) : (
           <box />
@@ -144,6 +433,10 @@ const tui: TuiPlugin = async (api, options) => {
                     selected={selected}
                     onToggleDir={toggleDir}
                     onOpenFile={(n) => openFile(api, n)}
+                    editing={editing}
+                    onEditingChange={handleEditingChange}
+                    onEditingSubmit={() => submitEditing(api)}
+                    onEditingCancel={cancelEditing}
                   />
                 </box>
               </box>
@@ -198,6 +491,45 @@ const tui: TuiPlugin = async (api, options) => {
       { key: toggleKey, cmd: "fs.toggle" },
       { key: openKey, cmd: "fs.open" },
       { key: refreshKey, cmd: "fs.refresh" },
+    ],
+  })
+
+  // 文件操作快捷键（创建/重命名/删除，priority 20 确保在输入框获焦时仍可触发，覆盖 prompt 的低优层）
+  // 为规避终端对 ctrl+alt 组合的拦截，额外提供备用键：createFile 备用 ctrl+alt+f，createFolder 备用 ctrl+shift+f
+  const createFileKey = resolvedKeymap["fs.createFile"]
+  const createFolderKey = resolvedKeymap["fs.createFolder"]
+  const renameKey = resolvedKeymap["fs.rename"]
+  const deleteKey = resolvedKeymap["fs.delete"]
+  const disposeFileOps = api.keymap.registerLayer({
+    priority: 20,
+    commands: [
+      { name: "fs.createFile", run() { startCreateFile(api) } },
+      { name: "fs.createFolder", run() { startCreateFolder(api) } },
+      { name: "fs.rename", run() { startRename(api) } },
+      { name: "fs.delete", run() { executeDelete(api) } },
+    ],
+    bindings: [
+      { key: createFileKey, cmd: "fs.createFile" },
+      { key: "ctrl+alt+f", cmd: "fs.createFile" },
+      { key: createFolderKey, cmd: "fs.createFolder" },
+      { key: "ctrl+shift+f", cmd: "fs.createFolder" },
+      { key: renameKey, cmd: "fs.rename" },
+      { key: deleteKey, cmd: "fs.delete" },
+    ],
+  })
+  api.lifecycle.onDispose(() => { try { (disposeFileOps as unknown as () => void)?.() } catch {} })
+
+  // inline 编辑态高优先级层（Enter 提交、Esc 取消，确保不抢 prompt）
+  api.keymap.registerLayer({
+    mode: "fs-plugin.inline-edit",
+    priority: 20,
+    commands: [
+      { name: "fs.inline.confirm", run() { submitEditing(api) } },
+      { name: "fs.inline.cancel", run() { cancelEditing(api) } },
+    ],
+    bindings: [
+      { key: "enter", cmd: "fs.inline.confirm" },
+      { key: "esc", cmd: "fs.inline.cancel" },
     ],
   })
 

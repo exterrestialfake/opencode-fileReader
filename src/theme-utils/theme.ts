@@ -1,4 +1,4 @@
-// src/theme.ts — 主题皮肤共享模块（供 FileTree/FileViewer 共用，避免 file-tree 依赖 file-viewer）
+// src/theme-utils/theme.ts — 主题皮肤共享模块（供 FileTree/FileViewer 共用）
 // 遵循 guidance/engineering_spec.md：函数加中文注释、错误信息中文
 import { RGBA } from "@opentui/core"
 import type { TuiThemeCurrent } from "@opencode-ai/plugin/tui"
