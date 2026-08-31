@@ -1,7 +1,7 @@
 // src/file-utils/file.ts — 文件相关工具（类型判定、外部打开、尺寸、文件操作）
 // 遵循 guidance/engineering_spec.md：函数加中文注释、错误信息中文
 import { spawn } from "node:child_process"
-import { closeSync, mkdirSync, openSync, readSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs"
+import { closeSync, mkdirSync, openSync, readSync, readdirSync, renameSync, rmSync, statSync, writeFileSync, readFileSync } from "node:fs"
 import { dirname, extname, join } from "node:path"
 
 /** 文本文件扩展名集合 */
@@ -175,5 +175,48 @@ export function getSiblingNames(parentDir: string): string[] {
     return readdirSync(parentDir)
   } catch {
     return []
+  }
+}
+
+/** 大文件阈值（超过则截断，避免终端卡死） */
+export const MAX_FILE_SIZE = 2 * 1024 * 1024 // 2MB
+export const MAX_LINES = 3000
+
+/** 截断读取结果 */
+export type LimitedFileContent = {
+  lines: string[]
+  truncated: boolean
+  originalSize: number
+  totalLines?: number
+}
+
+/**
+ * 按大小与行数截断读取文本文件（避免 200M 级别文件卡死终端）
+ * - 若文件大小超过 maxSize，仅读取前 maxSize 字节并按行截断
+ * - 若行数超过 maxLines，仅保留前 maxLines 行
+ */
+export function readFileLinesLimited(filePath: string, maxSize: number = MAX_FILE_SIZE, maxLines: number = MAX_LINES): LimitedFileContent {
+  try {
+    const stat = statSync(filePath)
+    const originalSize = stat.size
+    if (originalSize <= maxSize) {
+      const raw = readFileSync(filePath, "utf8")
+      const allLines = raw.split(/\r?\n/)
+      if (allLines.length > maxLines) {
+        return { lines: allLines.slice(0, maxLines), truncated: true, originalSize, totalLines: allLines.length }
+      }
+      return { lines: allLines, truncated: false, originalSize, totalLines: allLines.length }
+    }
+    const fd = openSync(filePath, "r")
+    const buf = Buffer.alloc(maxSize)
+    const n = readSync(fd, buf, 0, maxSize, 0)
+    closeSync(fd)
+    const raw = buf.subarray(0, n).toString("utf8")
+    const lines = raw.split(/\r?\n/)
+    if (n === maxSize && !raw.endsWith("\n")) lines.pop()
+    const sliced = lines.length > maxLines ? lines.slice(0, maxLines) : lines
+    return { lines: sliced, truncated: true, originalSize, totalLines: undefined }
+  } catch {
+    return { lines: ["（读取文件失败：无法访问该文件）"], truncated: false, originalSize: 0 }
   }
 }

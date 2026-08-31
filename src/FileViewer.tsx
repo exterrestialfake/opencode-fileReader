@@ -6,7 +6,6 @@ import { useBindings } from "@opentui/keymap/solid"
 import { createBindingLookup } from "@opentui/keymap/extras"
 import { useTerminalDimensions, type JSX } from "@opentui/solid"
 import type { ScrollBoxRenderable } from "@opentui/core"
-import { readFileSync } from "node:fs"
 import { extname } from "node:path"
 import type { TuiPluginApi } from "@opencode-ai/plugin/tui"
 import {
@@ -15,6 +14,7 @@ import {
   formatFileSize,
   readImageSize,
   openExternal,
+  readFileLinesLimited,
 } from "./file-utils/file"
 import { renderHighlighted } from "./highlight-utils/highlight"
 import { wrapLine, viewerWrapWidth } from "./layout-utils/layout"
@@ -41,16 +41,10 @@ export function FileViewer(props: {
   const dim = useTerminalDimensions()
   let scroll: ScrollBoxRenderable | undefined
 
-  // 文本内容（已移除 MAX_LINES 截断，完整加载）
-  const content = createMemo<{ lines: string[] } | null>(() => {
+  // 文本内容（按大小与行数截断，避免大文件卡死）
+  const content = createMemo<{ lines: string[]; truncated: boolean; originalSize: number; totalLines?: number } | null>(() => {
     if (!isTextFile(props.file.name, props.file.path)) return null
-    try {
-      const raw = readFileSync(props.file.path, "utf8")
-      const lines = raw.split(/\r?\n/)
-      return { lines }
-    } catch {
-      return { lines: ["（读取文件失败：无法访问该文件）"] }
-    }
+    return readFileLinesLimited(props.file.path)
   })
 
   const imageSize = createMemo(() =>
@@ -123,8 +117,14 @@ export function FileViewer(props: {
         <text fg={skin().text}>
           <b>{props.file.name}</b>
         </text>
-        <text fg={skin().muted}>{formatFileSize(props.file.size ?? 0)}</text>
+        <text fg={skin().muted}>{formatFileSize(props.file.size ?? content()?.originalSize ?? 0)}</text>
       </box>
+
+      <Show when={content()?.truncated}>
+        <box flexDirection="column" gap={1} paddingLeft={1} paddingRight={1}>
+          <text fg={skin().warning}>文件过大（{formatFileSize(content()!.originalSize)}{content()!.totalLines ? `，${content()!.totalLines} 行` : ""}），已截断显示前 {content()!.lines.length} 行，按 Enter 用系统查看器打开完整文件</text>
+        </box>
+      </Show>
 
       <box flexGrow={1} paddingLeft={1} paddingRight={1}>
         <Show
