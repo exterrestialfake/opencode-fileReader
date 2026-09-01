@@ -220,3 +220,37 @@ export function readFileLinesLimited(filePath: string, maxSize: number = MAX_FIL
     return { lines: ["（读取文件失败：无法访问该文件）"], truncated: false, originalSize: 0 }
   }
 }
+
+/** 大文件优化阈值（对标 VS Code：20MB 或 300K 行） */
+export const LARGE_FILE_SIZE = 20 * 1024 * 1024
+export const LARGE_FILE_LINES = 300_000
+
+/**
+ * 判断是否为大文件（触发 largeFileOptimizations）
+ * 仅通过 stat 快速判断大小，避免读取内容
+ */
+export function isLargeFile(filePath: string): boolean {
+  try {
+    const stat = statSync(filePath)
+    return stat.size > LARGE_FILE_SIZE
+  } catch {
+    return false
+  }
+}
+
+/**
+ * 按偏移分块读取文本（用于大文件视口按需加载）
+ * @param offset 起始字节偏移
+ * @param length 读取字节数
+ */
+export function readFileChunk(filePath: string, offset: number, length: number): string {
+  try {
+    const fd = openSync(filePath, "r")
+    const buf = Buffer.alloc(length)
+    const n = readSync(fd, buf, 0, length, offset)
+    closeSync(fd)
+    return buf.subarray(0, n).toString("utf8")
+  } catch {
+    return ""
+  }
+}

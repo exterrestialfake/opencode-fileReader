@@ -1,7 +1,7 @@
 /** @jsxImportSource @opentui/solid */
 // src/FileViewer.tsx — 文件查看器组件（全屏路由分栏中的代码区）
 // 遵循 guidance/engineering_spec.md：组件 PascalCase、函数 camelCase、中文注释
-import { createMemo, For, Show } from "solid-js"
+import { createEffect, createMemo, createSignal, For, onCleanup, Show } from "solid-js"
 import { useBindings } from "@opentui/keymap/solid"
 import { createBindingLookup } from "@opentui/keymap/extras"
 import { useTerminalDimensions, type JSX } from "@opentui/solid"
@@ -15,6 +15,9 @@ import {
   readImageSize,
   openExternal,
   readFileLinesLimited,
+  isLargeFile,
+  LARGE_FILE_SIZE,
+  LARGE_FILE_LINES,
 } from "./file-utils/file"
 import { renderHighlighted } from "./highlight-utils/highlight"
 import { wrapLine, viewerWrapWidth } from "./layout-utils/layout"
@@ -41,9 +44,21 @@ export function FileViewer(props: {
   const dim = useTerminalDimensions()
   let scroll: ScrollBoxRenderable | undefined
 
-  // 文本内容（按大小与行数截断，避免大文件卡死）
+  // 大文件判定（对标 VS Code：20MB 或 300K 行，命中则进入 largeFileOptimizations）
+  const isLargeMode = createMemo(() => {
+    try {
+      return isLargeFile(props.file.path)
+    } catch {
+      return false
+    }
+  })
+
+  // 文本内容：大文件模式下提高阈值并保留 wrappedLines，仅关高亮
   const content = createMemo<{ lines: string[]; truncated: boolean; originalSize: number; totalLines?: number } | null>(() => {
     if (!isTextFile(props.file.name, props.file.path)) return null
+    if (isLargeMode()) {
+      return readFileLinesLimited(props.file.path, LARGE_FILE_SIZE, LARGE_FILE_LINES)
+    }
     return readFileLinesLimited(props.file.path)
   })
 
@@ -71,6 +86,25 @@ export function FileViewer(props: {
     const w = wrappedLines()
     if (!w) return 0
     return w.reduce((sum, row) => sum + row.chunks.length, 0)
+  })
+
+  // 虚拟化：大文件仅渲染视口附近，避免一次性创建数十万节点（wrappedLines 保持启用）
+  const overscan = 5
+  const [scrollTop, setScrollTop] = createSignal(0)
+  createEffect(() => {
+    if (!scroll) return
+    const id = setInterval(() => setScrollTop(Math.floor(scroll?.scrollTop ?? 0)), 100)
+    onCleanup(() => clearInterval(id))
+  })
+  const visibleRows = createMemo(() => {
+    const w = wrappedLines()
+    if (!w) return null
+    if (!isLargeMode()) return w
+    const viewportH = (scroll?.viewport.height ?? dim().height) as number
+    const top = scrollTop()
+    const start = Math.max(0, top - overscan)
+    const end = Math.min(w.length, top + viewportH + overscan)
+    return w.slice(start, end)
   })
 
   const keys = createBindingLookup(viewerKeymap)
@@ -126,9 +160,15 @@ export function FileViewer(props: {
         </box>
       </Show>
 
+      <Show when={isLargeMode() && !content()?.truncated}>
+        <box flexDirection="column" gap={1} paddingLeft={1} paddingRight={1}>
+          <text fg={skin().muted}>大文件模式：已自动关闭着色以保持流畅，wrappedLines 保持启用，按 Enter 可用系统查看器打开</text>
+        </box>
+      </Show>
+
       <box flexGrow={1} paddingLeft={1} paddingRight={1}>
         <Show
-          when={wrappedLines()}
+          when={visibleRows()}
           keyed
           fallback={<BinaryInfo file={props.file} skin={skin()} imageSize={imageSize()} />}
         >
@@ -147,9 +187,11 @@ export function FileViewer(props: {
                           {chunkIndex() === 0 ? `${String(row.lineIndex + 1).padStart(4)}  ` : "      "}
                         </text>
                         <text fg={skin().text} wrapMode="none">
-                          <For each={renderHighlighted(chunk, fileExt(), skin())}>
-                            {(part) => (part.color ? <span style={{ fg: part.color }}>{part.text}</span> : part.text)}
-                          </For>
+                          <Show when={!isLargeMode()} fallback={chunk}>
+                            <For each={renderHighlighted(chunk, fileExt(), skin())}>
+                              {(part) => (part.color ? <span style={{ fg: part.color }}>{part.text}</span> : part.text)}
+                            </For>
+                          </Show>
                         </text>
                       </box>
                     )}
