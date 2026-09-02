@@ -116,7 +116,7 @@ export function FileViewer(props: {
     }))
   })
 
-  // 总可视行数：大文件用总行数（数据虚拟化），小文件用折行后行数
+  // 总可视行数：大文件用总行数（数据虚拟化），小文件用逻辑行数（虚拟化按逻辑行）
   const totalRows = createMemo(() => {
     if (isLargeMode()) {
       const offs = largeOffsets()
@@ -124,10 +124,10 @@ export function FileViewer(props: {
     }
     const w = wrappedLines()
     if (!w) return 0
-    return w.reduce((sum, row) => sum + row.chunks.length, 0)
+    return w.length
   })
 
-  // 虚拟化：小文件仅渲染视口附近，大文件已在数据层按需拉取，此处直接返回
+  // 虚拟化：按视口仅渲染可见行，避免 61533 行截断后仍有 14996 显示行的一次性渲染
   const overscan = 5
   const [scrollTop, setScrollTop] = createSignal(0)
   createEffect(() => {
@@ -135,15 +135,16 @@ export function FileViewer(props: {
     const id = setInterval(() => setScrollTop(Math.floor(scroll?.scrollTop ?? 0)), 100)
     onCleanup(() => clearInterval(id))
   })
-  const visibleRows = createMemo(() => {
+  const virtual = createMemo(() => {
     const w = wrappedLines()
     if (!w) return null
-    if (isLargeMode()) return w
+    if (isLargeMode()) return { rows: w, offset: 0, total: totalRows() }
+    if (w.length < 200) return { rows: w, offset: 0, total: w.length }
     const viewportH = (scroll?.viewport.height ?? dim().height) as number
     const top = scrollTop()
     const start = Math.max(0, top - overscan)
     const end = Math.min(w.length, top + viewportH + overscan)
-    return w.slice(start, end)
+    return { rows: w.slice(start, end), offset: start, total: w.length }
   })
 
   const keys = createBindingLookup(viewerKeymap)
@@ -207,17 +208,20 @@ export function FileViewer(props: {
 
       <box flexGrow={1} paddingLeft={1} paddingRight={1}>
         <Show
-          when={visibleRows()}
+          when={virtual()}
           keyed
           fallback={<BinaryInfo file={props.file} skin={skin()} imageSize={imageSize()} />}
         >
-          {(rows: { lineIndex: number; chunks: string[] }[]) => (
+          {(v: { rows: { lineIndex: number; chunks: string[] }[]; offset: number; total: number }) => (
             <scrollbox
               ref={(element: ScrollBoxRenderable) => (scroll = element)}
               verticalScrollbarOptions={{ visible: false }}
               horizontalScrollbarOptions={{ visible: false }}
             >
-              <For each={rows}>
+              <Show when={v.offset > 0}>
+                <box height={v.offset} />
+              </Show>
+              <For each={v.rows}>
                 {(row) => (
                   <For each={row.chunks}>
                     {(chunk, chunkIndex) => (
@@ -237,6 +241,9 @@ export function FileViewer(props: {
                   </For>
                 )}
               </For>
+              <Show when={v.offset + v.rows.length < v.total}>
+                <box height={v.total - v.offset - v.rows.length} />
+              </Show>
             </scrollbox>
           )}
         </Show>
