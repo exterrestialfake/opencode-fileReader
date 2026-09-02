@@ -254,3 +254,66 @@ export function readFileChunk(filePath: string, offset: number, length: number):
     return ""
   }
 }
+
+/**
+ * 构建行起始偏移索引（64KB 块扫描，适配大文件）
+ * @returns offsets[i] 为第 i 行的起始字节偏移，offsets.length = 总行数
+ */
+export function buildLineOffsets(filePath: string): number[] {
+  const offsets: number[] = [0]
+  try {
+    const stat = statSync(filePath)
+    const size = stat.size
+    if (size === 0) return offsets
+    const fd = openSync(filePath, "r")
+    const chunkSize = 64 * 1024
+    const buf = Buffer.alloc(chunkSize)
+    let fileOffset = 0
+    let leftover = 0
+    while (fileOffset < size) {
+      const toRead = Math.min(chunkSize, size - fileOffset)
+      const n = readSync(fd, buf, 0, toRead, fileOffset)
+      if (n <= 0) break
+      for (let i = 0; i < n; i++) {
+        if (buf[i] === 10) { // \n
+          offsets.push(fileOffset + i + 1)
+        }
+      }
+      fileOffset += n
+    }
+    closeSync(fd)
+    // 若文件以 \n 结尾，最后一个偏移指向 EOF，不计为新行
+    if (offsets.length > 1 && offsets[offsets.length - 1] === size) offsets.pop()
+    return offsets
+  } catch {
+    return offsets
+  }
+}
+
+/**
+ * 按行范围读取（依赖 buildLineOffsets，按需拉取）
+ * @param startLine 起始行（0 基）
+ * @param count 行数
+ */
+export function readLinesRange(filePath: string, startLine: number, count: number, offsets?: number[]): { lines: string[]; totalLines: number } {
+  try {
+    const offs = offsets ?? buildLineOffsets(filePath)
+    const totalLines = offs.length
+    const endLine = Math.min(startLine + count, totalLines)
+    if (startLine >= totalLines) return { lines: [], totalLines }
+    const startOffset = offs[startLine]!
+    const endOffset = endLine < totalLines ? offs[endLine]! : statSync(filePath).size
+    const len = endOffset - startOffset
+    const fd = openSync(filePath, "r")
+    const buf = Buffer.alloc(len)
+    const n = readSync(fd, buf, 0, len, startOffset)
+    closeSync(fd)
+    const raw = buf.subarray(0, n).toString("utf8")
+    const lines = raw.split(/\r?\n/)
+    // 若读取块以 \n 结尾，split 会多一个空串，去掉
+    if (raw.endsWith("\n") && lines.length > 0 && lines[lines.length - 1] === "") lines.pop()
+    return { lines, totalLines }
+  } catch {
+    return { lines: [], totalLines: 0 }
+  }
+}

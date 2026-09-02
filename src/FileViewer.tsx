@@ -18,6 +18,8 @@ import {
   isLargeFile,
   LARGE_FILE_SIZE,
   LARGE_FILE_LINES,
+  buildLineOffsets,
+  readLinesRange,
 } from "./file-utils/file"
 import { renderHighlighted } from "./highlight-utils/highlight"
 import { wrapLine, viewerWrapWidth } from "./layout-utils/layout"
@@ -53,11 +55,43 @@ export function FileViewer(props: {
     }
   })
 
-  // 文本内容：大文件模式下提高阈值并保留 wrappedLines，仅关高亮
+  // 大文件渐进：构建行偏移索引，视口按需拉取（数据虚拟化）
+  const largeOffsets = createMemo(() => {
+    if (!isLargeMode()) return null
+    if (!isTextFile(props.file.name, props.file.path)) return null
+    try {
+      return buildLineOffsets(props.file.path)
+    } catch {
+      return null
+    }
+  })
+  const [largeWindow, setLargeWindow] = createSignal<{ lines: string[]; start: number; totalLines: number } | null>(null)
+  // 首屏与滚动驱动的按需拉取
+  createEffect(() => {
+    if (!isLargeMode()) return
+    const offs = largeOffsets()
+    if (!offs) return
+    const viewportH = scroll?.viewport.height ?? dim().height
+    const top = scrollTop()
+    const start = Math.max(0, top - 10)
+    const count = Math.max(50, viewportH + 20)
+    const { lines, totalLines } = readLinesRange(props.file.path, start, count, offs)
+    setLargeWindow({ lines, start, totalLines })
+  })
+
+  // 文本内容：大文件走渐进窗口，小文件走截断读取
   const content = createMemo<{ lines: string[]; truncated: boolean; originalSize: number; totalLines?: number } | null>(() => {
     if (!isTextFile(props.file.name, props.file.path)) return null
     if (isLargeMode()) {
-      return readFileLinesLimited(props.file.path, LARGE_FILE_SIZE, LARGE_FILE_LINES)
+      const offs = largeOffsets()
+      const win = largeWindow()
+      if (!offs) return null
+      // 渐进窗口未就绪时先返回首屏
+      if (!win) {
+        const { lines } = readLinesRange(props.file.path, 0, 50, offs)
+        return { lines, truncated: false, originalSize: offs.length, totalLines: offs.length }
+      }
+      return { lines: win.lines, truncated: false, originalSize: offs.length, totalLines: win.totalLines }
     }
     return readFileLinesLimited(props.file.path)
   })
@@ -75,20 +109,25 @@ export function FileViewer(props: {
     void dim().width
     const viewportWidth = scroll?.viewport.width ?? 0
     const width = viewerWrapWidth(viewportWidth, dim().width)
+    const start = isLargeMode() ? (largeWindow()?.start ?? 0) : 0
     return c.lines.map((line, idx) => ({
-      lineIndex: idx,
+      lineIndex: start + idx,
       chunks: wrapLine(line, width),
     }))
   })
 
-  // 总可视行数（滚动上限依据，直接内联求和）
+  // 总可视行数：大文件用总行数（数据虚拟化），小文件用折行后行数
   const totalRows = createMemo(() => {
+    if (isLargeMode()) {
+      const offs = largeOffsets()
+      return offs ? offs.length : 0
+    }
     const w = wrappedLines()
     if (!w) return 0
     return w.reduce((sum, row) => sum + row.chunks.length, 0)
   })
 
-  // 虚拟化：大文件仅渲染视口附近，避免一次性创建数十万节点（wrappedLines 保持启用）
+  // 虚拟化：小文件仅渲染视口附近，大文件已在数据层按需拉取，此处直接返回
   const overscan = 5
   const [scrollTop, setScrollTop] = createSignal(0)
   createEffect(() => {
@@ -99,7 +138,7 @@ export function FileViewer(props: {
   const visibleRows = createMemo(() => {
     const w = wrappedLines()
     if (!w) return null
-    if (!isLargeMode()) return w
+    if (isLargeMode()) return w
     const viewportH = (scroll?.viewport.height ?? dim().height) as number
     const top = scrollTop()
     const start = Math.max(0, top - overscan)
